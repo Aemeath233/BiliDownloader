@@ -31,6 +31,9 @@ class TaskStatus(str, Enum):
 class AppConfig:
     sessdata: str = ""
     save_path: str = str(Path.cwd() / "video")
+    organize_by_source: bool = False
+    filename_template: str = "{title}"
+    cleanup_temp_files: bool = True
     speed_limit_mb: float = 0.0
     max_concurrent_tasks: int = 2
     ffmpeg_path: str = "ffmpeg"
@@ -58,6 +61,9 @@ class MediaParseResult:
     title: str
     episodes: list[EpisodeInfo]
     default_episode_index: int = 0
+    folder_title: str = ""
+    source_name: str = ""
+    media_type: str = "video"
 
 
 @dataclass(slots=True)

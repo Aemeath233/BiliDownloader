@@ -123,6 +123,22 @@ class DownloadManagerTests(unittest.TestCase):
         self.assertTrue(removed)
         self.assertNotIn(task_id, {task["task_id"] for task in self.manager.snapshot()["tasks"]})
 
+    def test_create_task_accepts_custom_filename_stem(self) -> None:
+        episode = EpisodeInfo(title="demo", bvid="BV1xx411c7mD", cid=1, is_bangumi=False)
+        quality = QualityOption(qn=80, label="1080P")
+
+        task_id = self.manager.create_task(
+            source_url="https://www.bilibili.com/video/BV1xx411c7mD",
+            episode=episode,
+            quality=quality,
+            save_dir=self.temp_dir.name,
+            sessdata="",
+            filename_stem="01-demo-1080P",
+        )
+
+        tasks = {task["task_id"]: task for task in self.manager.snapshot()["tasks"]}
+        self.assertTrue(tasks[task_id]["output_path"].endswith("01-demo-1080P.mp4"))
+
     def test_clear_finished_removes_only_terminal_tasks(self) -> None:
         episode = EpisodeInfo(title="demo", bvid="BV1xx411c7mD", cid=1, is_bangumi=False)
         quality = QualityOption(qn=80, label="1080P")

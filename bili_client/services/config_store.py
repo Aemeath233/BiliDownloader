@@ -31,6 +31,10 @@ class ConfigStore:
             config = AppConfig(
                 sessdata=str(data.get("sessdata", config.sessdata)).strip(),
                 save_path=str(data.get("save_path", config.save_path)).strip(),
+                organize_by_source=bool(data.get("organize_by_source", config.organize_by_source)),
+                filename_template=str(data.get("filename_template", config.filename_template)).strip()
+                or config.filename_template,
+                cleanup_temp_files=bool(data.get("cleanup_temp_files", config.cleanup_temp_files)),
                 speed_limit_mb=float(data.get("speed_limit_mb", data.get("speed_limit", config.speed_limit_mb)) or 0),
                 max_concurrent_tasks=max(1, int(data.get("max_concurrent_tasks", config.max_concurrent_tasks) or 1)),
                 ffmpeg_path=str(data.get("ffmpeg_path", config.ffmpeg_path)).strip() or "ffmpeg",
@@ -45,6 +49,9 @@ class ConfigStore:
         payload = {
             "sessdata": config.sessdata.strip(),
             "save_path": config.save_path.strip(),
+            "organize_by_source": bool(config.organize_by_source),
+            "filename_template": config.filename_template.strip() or "{title}",
+            "cleanup_temp_files": bool(config.cleanup_temp_files),
             "speed_limit_mb": float(config.speed_limit_mb),
             "max_concurrent_tasks": int(config.max_concurrent_tasks),
             "ffmpeg_path": config.ffmpeg_path.strip() or "ffmpeg",

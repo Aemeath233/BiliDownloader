@@ -16,6 +16,7 @@ from bili_client.core.models import (
     QualityOption,
     StreamInfo,
     TaskStatus,
+    safe_filename,
 )
 from bili_client.services.bili_api import BiliApiError, BilibiliApi
 from bili_client.services.ffmpeg import FFmpegService
@@ -56,6 +57,7 @@ class DownloadManager:
         self._stop_event = threading.Event()
 
         self._max_concurrent_tasks = max(1, int(config.max_concurrent_tasks))
+        self._cleanup_temp_files = bool(config.cleanup_temp_files)
         self._rate_limiter = GlobalRateLimiter(int(max(0.0, config.speed_limit_mb) * 1024 * 1024))
         self.ffmpeg.set_command(config.ffmpeg_path)
 
@@ -70,6 +72,7 @@ class DownloadManager:
     def update_config(self, config: AppConfig) -> None:
         with self._config_lock:
             self._max_concurrent_tasks = max(1, int(config.max_concurrent_tasks))
+            self._cleanup_temp_files = bool(config.cleanup_temp_files)
             self._rate_limiter.update_limit(int(max(0.0, config.speed_limit_mb) * 1024 * 1024))
             self.ffmpeg.set_command(config.ffmpeg_path)
         self.logger(
@@ -84,11 +87,13 @@ class DownloadManager:
         quality: QualityOption,
         save_dir: str,
         sessdata: str,
+        filename_stem: str | None = None,
     ) -> str:
         task_id = uuid.uuid4().hex[:10]
         save_path = Path(save_dir)
         save_path.mkdir(parents=True, exist_ok=True)
-        output_path = self._next_available_path(save_path / f"{episode.title}.mp4")
+        output_stem = safe_filename(filename_stem or episode.title)
+        output_path = self._next_available_path(save_path / f"{output_stem}.mp4")
 
         task = DownloadTask(
             task_id=task_id,
@@ -160,18 +165,20 @@ class DownloadManager:
                     task.save_dir,
                     task.sessdata,
                     task.title,
+                    Path(task.output_path).stem,
                 )
                 for task in self._tasks.values()
                 if task.status in retry_statuses
             ]
 
-        for source_url, episode, quality, save_dir, sessdata, _title in specs:
+        for source_url, episode, quality, save_dir, sessdata, _title, filename_stem in specs:
             self.create_task(
                 source_url=source_url,
                 episode=episode,
                 quality=quality,
                 save_dir=save_dir,
                 sessdata=sessdata,
+                filename_stem=filename_stem,
             )
 
         if specs:
@@ -183,15 +190,24 @@ class DownloadManager:
             task = self._tasks.get(task_id)
             if task is None or task.status not in RETRYABLE_STATUSES:
                 return None
-            spec = (task.source_url, task.episode, task.quality, task.save_dir, task.sessdata, task.title)
+            spec = (
+                task.source_url,
+                task.episode,
+                task.quality,
+                task.save_dir,
+                task.sessdata,
+                task.title,
+                Path(task.output_path).stem,
+            )
 
-        source_url, episode, quality, save_dir, sessdata, title = spec
+        source_url, episode, quality, save_dir, sessdata, title, filename_stem = spec
         new_task_id = self.create_task(
             source_url=source_url,
             episode=episode,
             quality=quality,
             save_dir=save_dir,
             sessdata=sessdata,
+            filename_stem=filename_stem,
         )
         self.logger(f"已重新加入任务：{title}")
         return new_task_id
@@ -529,7 +545,10 @@ class DownloadManager:
             with self._tasks_lock:
                 self._active_ids.discard(task_id)
                 self._workers.pop(task_id, None)
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            with self._config_lock:
+                cleanup_temp_files = self._cleanup_temp_files
+            if cleanup_temp_files:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _get_streams_for_task(
         self,

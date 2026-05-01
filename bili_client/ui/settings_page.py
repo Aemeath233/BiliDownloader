@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import threading
+import time
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -27,6 +29,9 @@ class SettingsPage(ctk.CTkFrame):
         self.on_save_config = on_save_config
         self.auth_service = auth_service
         self._loaded_form_values: dict[str, str] = {}
+        self.show_sessdata_var = ctk.BooleanVar(value=False)
+        self.organize_by_source_var = ctk.BooleanVar(value=False)
+        self.cleanup_temp_files_var = ctk.BooleanVar(value=True)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -59,8 +64,81 @@ class SettingsPage(ctk.CTkFrame):
         form.grid(row=1, column=0, sticky="ew", padx=18, pady=(8, 18))
         form.grid_columnconfigure(0, weight=1)
 
-        self.sessdata_entry = self._entry_block(form, 0, "SESSDATA", "可选，高画质或会员内容可能需要", show="*")
-        self.save_path_entry = self._entry_block(form, 1, "保存目录", "默认保存到 video")
+        auth_card = ctk.CTkFrame(form, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
+        auth_card.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 12))
+        auth_card.grid_columnconfigure(0, weight=1)
+
+        self.account_state_label = ctk.CTkLabel(
+            auth_card,
+            text="账号状态",
+            anchor="w",
+            text_color=PALETTE["text"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
+        )
+        self.account_state_label.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 2))
+
+        self.account_detail_label = ctk.CTkLabel(
+            auth_card,
+            text="正在读取登录状态",
+            anchor="w",
+            justify="left",
+            text_color=PALETTE["muted"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        )
+        self.account_detail_label.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+
+        auth_actions = ctk.CTkFrame(auth_card, fg_color="transparent")
+        auth_actions.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
+        auth_actions.grid_columnconfigure((0, 1), weight=1)
+
+        self.check_auth_button = ctk.CTkButton(
+            auth_actions,
+            text="重新检查",
+            command=self._check_auth_status,
+            fg_color=PALETTE["secondary"],
+            hover_color=PALETTE["secondary_hover"],
+            text_color=PALETTE["text"],
+            height=34,
+            corner_radius=CARD_RADIUS,
+            state="normal" if self.auth_service is not None else "disabled",
+        )
+        self.check_auth_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        self.qr_login_button = ctk.CTkButton(
+            auth_actions,
+            text="扫码登录",
+            command=self._open_qr_login,
+            fg_color=PALETTE["primary"],
+            hover_color=PALETTE["primary_hover"],
+            height=34,
+            corner_radius=CARD_RADIUS,
+            state="normal" if self.auth_service is not None else "disabled",
+        )
+        self.qr_login_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        self.toggle_sessdata_button = ctk.CTkButton(
+            form,
+            text="显示 SESSDATA 高级项",
+            command=self._toggle_sessdata_visibility,
+            fg_color=PALETTE["secondary"],
+            hover_color=PALETTE["secondary_hover"],
+            text_color=PALETTE["text"],
+            height=34,
+            corner_radius=CARD_RADIUS,
+        )
+        self.toggle_sessdata_button.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+
+        self.sessdata_advanced_frame = ctk.CTkFrame(form, fg_color="transparent")
+        self.sessdata_advanced_frame.grid_columnconfigure(0, weight=1)
+        self.sessdata_entry = self._entry_block(
+            self.sessdata_advanced_frame,
+            0,
+            "SESSDATA",
+            "通常无需手动填写，扫码登录会自动维护",
+            show="*",
+        )
+
+        self.save_path_entry = self._entry_block(form, 2, "保存目录", "默认保存到 video")
 
         ctk.CTkButton(
             form,
@@ -71,33 +149,7 @@ class SettingsPage(ctk.CTkFrame):
             text_color=PALETTE["text"],
             height=36,
             corner_radius=CARD_RADIUS,
-        ).grid(row=4, column=0, sticky="ew", padx=14, pady=(0, 14))
-
-        auth_row = ctk.CTkFrame(form, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
-        auth_row.grid(row=5, column=0, sticky="ew", padx=14, pady=(0, 14))
-        auth_row.grid_columnconfigure(0, weight=1)
-
-        self.auth_status_label = ctk.CTkLabel(
-            auth_row,
-            text="可用扫码登录自动保存并刷新 SESSDATA",
-            anchor="w",
-            justify="left",
-            text_color=PALETTE["muted"],
-            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-        )
-        self.auth_status_label.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
-
-        self.qr_login_button = ctk.CTkButton(
-            auth_row,
-            text="扫码登录 / 更新 SESSDATA",
-            command=self._open_qr_login,
-            fg_color=PALETTE["primary"],
-            hover_color=PALETTE["primary_hover"],
-            height=36,
-            corner_radius=CARD_RADIUS,
-            state="normal" if self.auth_service is not None else "disabled",
-        )
-        self.qr_login_button.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ).grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 14))
 
     def _build_runtime_panel(self) -> None:
         panel = ctk.CTkFrame(self.scroll_frame, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
@@ -157,6 +209,65 @@ class SettingsPage(ctk.CTkFrame):
             text_color=PALETTE["text"],
         )
         self.appearance_option.grid(row=5, column=0, sticky="ew", padx=14, pady=(0, 14))
+
+        ctk.CTkLabel(
+            form,
+            text="下载目录与命名",
+            text_color=PALETTE["muted"],
+            anchor="w",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+        ).grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 6))
+
+        rules = ctk.CTkFrame(form, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
+        rules.grid(row=7, column=0, sticky="ew", padx=14, pady=(0, 14))
+        rules.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkCheckBox(
+            rules,
+            text="按 UP 主 / 番剧名创建子文件夹",
+            variable=self.organize_by_source_var,
+            command=self._on_form_changed,
+            fg_color=PALETTE["primary"],
+            hover_color=PALETTE["primary_hover"],
+            text_color=PALETTE["text"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+
+        ctk.CTkLabel(
+            rules,
+            text="文件名模板",
+            text_color=PALETTE["muted"],
+            anchor="w",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+        ).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+        self.filename_template_entry = ctk.CTkEntry(
+            rules,
+            placeholder_text="{title}",
+            height=38,
+            fg_color=PALETTE["input_bg"],
+            border_color=PALETTE["border"],
+            text_color=PALETTE["text"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+        )
+        self.filename_template_entry.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 8))
+        ctk.CTkLabel(
+            rules,
+            text="可用：{title} {media} {quality} {bvid} {cid} {index} {total}",
+            text_color=PALETTE["muted"],
+            anchor="w",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+        ).grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        ctk.CTkCheckBox(
+            rules,
+            text="下载结束后自动清理临时文件",
+            variable=self.cleanup_temp_files_var,
+            command=self._on_form_changed,
+            fg_color=PALETTE["primary"],
+            hover_color=PALETTE["primary_hover"],
+            text_color=PALETTE["text"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        ).grid(row=4, column=0, sticky="w", padx=12, pady=(0, 12))
 
     def _build_status_panel(self) -> None:
         info_panel = ctk.CTkFrame(self.scroll_frame, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
@@ -218,6 +329,7 @@ class SettingsPage(ctk.CTkFrame):
             self.ffmpeg_entry,
             self.speed_limit_entry,
             self.max_tasks_entry,
+            self.filename_template_entry,
         ):
             entry.bind("<KeyRelease>", lambda _event: self._on_form_changed())
             entry.bind("<FocusOut>", lambda _event: self._on_form_changed())
@@ -274,13 +386,20 @@ class SettingsPage(ctk.CTkFrame):
             (self.ffmpeg_entry, config.ffmpeg_path),
             (self.speed_limit_entry, str(config.speed_limit_mb)),
             (self.max_tasks_entry, str(config.max_concurrent_tasks)),
+            (self.filename_template_entry, config.filename_template),
         ):
             entry.delete(0, "end")
             entry.insert(0, value)
 
+        self.organize_by_source_var.set(bool(config.organize_by_source))
+        self.cleanup_temp_files_var.set(bool(config.cleanup_temp_files))
         self.appearance_option.set(APPEARANCE_LABELS.get(config.appearance_mode or "system", "跟随系统"))
         self.limit_status_label.configure(
-            text=f"当前总限速：{config.speed_limit_mb or 0:.2f} MB/s\n当前并发任务：{config.max_concurrent_tasks}",
+            text=(
+                f"当前总限速：{config.speed_limit_mb or 0:.2f} MB/s\n"
+                f"当前并发任务：{config.max_concurrent_tasks}\n"
+                f"命名模板：{config.filename_template or '{title}'}"
+            ),
             text_color=PALETTE["muted"],
         )
         self._loaded_form_values = self._current_form_values()
@@ -293,6 +412,9 @@ class SettingsPage(ctk.CTkFrame):
         return {
             "sessdata": self.sessdata_entry.get().strip(),
             "save_path": self.save_path_entry.get().strip(),
+            "organize_by_source": str(bool(self.organize_by_source_var.get())),
+            "filename_template": self.filename_template_entry.get().strip(),
+            "cleanup_temp_files": str(bool(self.cleanup_temp_files_var.get())),
             "ffmpeg_path": self.ffmpeg_entry.get().strip(),
             "speed_limit_mb": self.speed_limit_entry.get().strip(),
             "max_concurrent_tasks": self.max_tasks_entry.get().strip(),
@@ -371,6 +493,9 @@ class SettingsPage(ctk.CTkFrame):
         return AppConfig(
             sessdata=self.sessdata_entry.get().strip(),
             save_path=save_path,
+            organize_by_source=bool(self.organize_by_source_var.get()),
+            filename_template=self.filename_template_entry.get().strip() or "{title}",
+            cleanup_temp_files=bool(self.cleanup_temp_files_var.get()),
             speed_limit_mb=speed_limit,
             max_concurrent_tasks=max_tasks,
             ffmpeg_path=ffmpeg_path,
@@ -391,11 +516,25 @@ class SettingsPage(ctk.CTkFrame):
     def _mark_config_saved(self, config: AppConfig) -> None:
         self._loaded_form_values = self._current_form_values()
         self.limit_status_label.configure(
-            text=f"当前总限速：{config.speed_limit_mb or 0:.2f} MB/s\n当前并发任务：{config.max_concurrent_tasks}",
+            text=(
+                f"当前总限速：{config.speed_limit_mb or 0:.2f} MB/s\n"
+                f"当前并发任务：{config.max_concurrent_tasks}\n"
+                f"命名模板：{config.filename_template or '{title}'}"
+            ),
             text_color=PALETTE["muted"],
         )
         self._update_auth_status(config.sessdata)
         self._update_form_feedback()
+
+    def _toggle_sessdata_visibility(self) -> None:
+        visible = not self.show_sessdata_var.get()
+        self.show_sessdata_var.set(visible)
+        if visible:
+            self.sessdata_advanced_frame.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 12))
+            self.toggle_sessdata_button.configure(text="隐藏 SESSDATA 高级项")
+        else:
+            self.sessdata_advanced_frame.grid_forget()
+            self.toggle_sessdata_button.configure(text="显示 SESSDATA 高级项")
 
     def _open_qr_login(self) -> None:
         if self.auth_service is None:
@@ -404,19 +543,73 @@ class SettingsPage(ctk.CTkFrame):
         QrLoginDialog(self, auth_service=self.auth_service, on_success=self._on_auth_success)
 
     def _on_auth_success(self, session: AuthSession) -> None:
+        self._apply_auth_session(session, save=True)
+        self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
+
+    def _check_auth_status(self) -> None:
+        if self.auth_service is None:
+            messagebox.showwarning("登录检查不可用", "当前没有初始化登录服务。")
+            return
+
+        self.check_auth_button.configure(state="disabled", text="检查中...")
+        self._set_account_status("正在检查", "正在向 B 站确认登录状态", PALETTE["accent"])
+        sessdata = self.sessdata_entry.get().strip()
+        threading.Thread(target=self._auth_check_worker, args=(sessdata,), daemon=True).start()
+
+    def _auth_check_worker(self, sessdata: str) -> None:
+        try:
+            assert self.auth_service is not None
+            session = self.auth_service.ensure_latest_session(sessdata, force=True)
+            self.after(0, lambda: self._on_auth_check_success(session))
+        except Exception as exc:
+            self.after(0, lambda: self._on_auth_check_failure(str(exc)))
+
+    def _on_auth_check_success(self, session: AuthSession | None) -> None:
+        self.check_auth_button.configure(state="normal", text="重新检查")
+        if session is None or not session.sessdata:
+            self._set_account_status("未登录", "没有检测到可用登录态，请扫码登录。", PALETTE["warning"])
+            return
+
+        self._apply_auth_session(session, save=True)
+        self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
+
+    def _on_auth_check_failure(self, message: str) -> None:
+        self.check_auth_button.configure(state="normal", text="重新检查")
+        self._set_account_status("登录失效", message or "登录状态检查失败，请重新扫码登录。", PALETTE["error"])
+
+    def _apply_auth_session(self, session: AuthSession, save: bool) -> None:
         self.sessdata_entry.delete(0, "end")
         self.sessdata_entry.insert(0, session.sessdata)
         self._on_form_changed()
-        self._save_settings()
-        self.auth_status_label.configure(text="扫码登录成功，SESSDATA 已保存", text_color=PALETTE["success"])
+        if save:
+            self._save_settings()
 
     def _update_auth_status(self, sessdata: str) -> None:
-        if not hasattr(self, "auth_status_label"):
+        if not hasattr(self, "account_state_label"):
+            return
+        session = self.auth_service.load_session() if self.auth_service is not None else None
+        if session is not None and session.sessdata:
+            self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
             return
         if sessdata.strip():
-            self.auth_status_label.configure(text="当前已保存 SESSDATA，可通过扫码登录更新", text_color=PALETTE["success"])
-        else:
-            self.auth_status_label.configure(text="未保存 SESSDATA，建议扫码登录", text_color=PALETTE["warning"])
+            self._set_account_status("已保存登录态", "检测到旧版 SESSDATA，可点击重新检查确认是否可用。", PALETTE["warning"])
+            return
+        self._set_account_status("未登录", "扫码登录后会自动保存登录状态。", PALETTE["warning"])
+
+    def _set_account_status(self, title: str, detail: str, color) -> None:
+        self.account_state_label.configure(text=title, text_color=color)
+        self.account_detail_label.configure(text=detail, text_color=PALETTE["muted"])
+
+    def _auth_session_detail(self, session: AuthSession) -> str:
+        user_id = session.cookies.get("DedeUserID") or "未知 UID"
+        updated = self._format_timestamp(session.updated_at)
+        checked = self._format_timestamp(session.last_checked_at)
+        return f"UID：{user_id}\n上次刷新：{updated}\n上次检查：{checked}"
+
+    def _format_timestamp(self, timestamp: float | None) -> str:
+        if not timestamp:
+            return "尚未检查"
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(timestamp))
 
     def _pick_save_dir(self) -> None:
         selected = filedialog.askdirectory(title="选择下载目录")

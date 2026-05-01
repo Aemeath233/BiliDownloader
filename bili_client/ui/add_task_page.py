@@ -8,6 +8,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from bili_client.core.errors import humanize_error
+from bili_client.core.naming import render_filename_template
 from bili_client.core.models import AppConfig, MediaParseResult, QualityOption
 from bili_client.services.bili_api import BiliApiError, BilibiliApi
 from bili_client.services.download_manager import DownloadManager
@@ -48,8 +49,11 @@ class AddTaskPage(ctk.CTkFrame):
 
         self.parse_status_var = ctk.StringVar(value="等待链接")
         self.media_title_var = ctk.StringVar(value="尚未解析")
+        self.media_info_var = ctk.StringVar(value="解析完成后会显示视频信息")
         self.selection_summary_var = ctk.StringVar(value="分集：等待解析")
         self.quality_hint_var = ctk.StringVar(value="画质：等待分集选择")
+        self.selection_detail_var = ctk.StringVar(value="未选择分集")
+        self.filename_preview_var = ctk.StringVar(value="文件名：等待解析")
 
         self.grid_columnconfigure(0, weight=5)
         self.grid_columnconfigure(1, weight=4)
@@ -141,6 +145,15 @@ class AddTaskPage(ctk.CTkFrame):
             text_color=PALETTE["text"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
         ).grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+        ctk.CTkLabel(
+            status_panel,
+            textvariable=self.media_info_var,
+            anchor="w",
+            justify="left",
+            wraplength=620,
+            text_color=PALETTE["muted"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 12))
 
         config_panel = ctk.CTkFrame(panel, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
         config_panel.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 18))
@@ -183,7 +196,7 @@ class AddTaskPage(ctk.CTkFrame):
         panel = ctk.CTkFrame(self, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
         panel.grid(row=0, column=1, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(3, weight=1)
+        panel.grid_rowconfigure(4, weight=1)
 
         ctk.CTkLabel(
             panel,
@@ -199,9 +212,18 @@ class AddTaskPage(ctk.CTkFrame):
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=1, column=0, sticky="ew", padx=18)
+        ctk.CTkLabel(
+            panel,
+            textvariable=self.selection_detail_var,
+            anchor="w",
+            justify="left",
+            wraplength=560,
+            text_color=PALETTE["muted"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        ).grid(row=2, column=0, sticky="ew", padx=18, pady=(3, 0))
 
         tools = ctk.CTkFrame(panel, fg_color="transparent")
-        tools.grid(row=2, column=0, sticky="ew", padx=18, pady=(14, 10))
+        tools.grid(row=3, column=0, sticky="ew", padx=18, pady=(14, 10))
         tools.grid_columnconfigure((0, 1, 2), weight=1)
         actions = (
             ("全选", self._select_all_episodes),
@@ -225,7 +247,7 @@ class AddTaskPage(ctk.CTkFrame):
             fg_color=PALETTE["surface"],
             corner_radius=CARD_RADIUS,
         )
-        self.episode_scroll.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 12))
+        self.episode_scroll.grid(row=4, column=0, sticky="nsew", padx=18, pady=(0, 12))
         self.episode_scroll.grid_columnconfigure(0, weight=1)
 
         self.episode_placeholder = ctk.CTkLabel(
@@ -237,7 +259,7 @@ class AddTaskPage(ctk.CTkFrame):
         self.episode_placeholder.grid(row=0, column=0, pady=28)
 
         quality_panel = ctk.CTkFrame(panel, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
-        quality_panel.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 18))
+        quality_panel.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 18))
         quality_panel.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -267,6 +289,16 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_combo.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
         self.quality_combo.set("等待画质")
 
+        ctk.CTkLabel(
+            quality_panel,
+            textvariable=self.filename_preview_var,
+            anchor="w",
+            justify="left",
+            wraplength=540,
+            text_color=PALETTE["muted"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 12))
+
         self.add_button = ctk.CTkButton(
             quality_panel,
             text="先解析链接",
@@ -278,7 +310,7 @@ class AddTaskPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
         )
-        self.add_button.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
+        self.add_button.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 14))
 
     def _bind_shortcuts(self) -> None:
         self.url_input.bind("<Control-Return>", self._submit_parse_shortcut)
@@ -312,12 +344,14 @@ class AddTaskPage(ctk.CTkFrame):
         self.preferred_quality_label = None
         self.parse_status_var.set("等待链接")
         self.media_title_var.set("尚未解析")
+        self.media_info_var.set("解析完成后会显示视频信息")
         self._reset_episode_selector("解析完成后会显示可下载分集")
         self._set_quality_waiting_state("等待画质")
 
     def _on_quality_selected(self, value: str) -> None:
         if any(item.label == value for item in self.current_qualities):
             self.preferred_quality_label = value
+        self._update_filename_preview()
         self._refresh_add_button_state()
 
     def _apply_quality_options(self, labels: list[str]) -> None:
@@ -333,9 +367,12 @@ class AddTaskPage(ctk.CTkFrame):
             text=(
                 f"保存目录：{config.save_path}\n"
                 f"SESSDATA：{sessdata_text}  |  并发：{config.max_concurrent_tasks}  |  限速：{speed_limit}\n"
+                f"命名：{config.filename_template or '{title}'}"
+                f"{'  |  按来源分文件夹' if config.organize_by_source else ''}\n"
                 f"FFmpeg：{config.ffmpeg_path}"
             )
         )
+        self._update_filename_preview()
 
     def _reset_episode_selector(self, placeholder: str) -> None:
         for checkbox in self.episode_checkboxes.values():
@@ -347,7 +384,9 @@ class AddTaskPage(ctk.CTkFrame):
         self.episode_placeholder.configure(text=placeholder)
         self.episode_placeholder.grid(row=0, column=0, pady=28)
         self.selection_summary_var.set("分集：等待解析")
+        self.selection_detail_var.set("未选择分集")
         self.quality_hint_var.set("画质：等待分集选择")
+        self.filename_preview_var.set("文件名：等待解析")
         self._refresh_add_button_state()
 
     def _populate_episode_selector(self, media: MediaParseResult) -> None:
@@ -379,6 +418,13 @@ class AddTaskPage(ctk.CTkFrame):
     def _selected_episode_indices(self) -> list[int]:
         return [index for index, variable in self.episode_selection_vars.items() if variable.get()]
 
+    def _selected_episode_preview(self, selected: list[int]) -> str:
+        if not self.current_media or not selected:
+            return "未选择分集"
+        titles = [self.current_media.episodes[index].title for index in selected[:3]]
+        suffix = f" 等 {len(selected)} 个" if len(selected) > 3 else ""
+        return "已选：" + "、".join(titles) + suffix
+
     def _update_episode_selection_summary(self) -> None:
         total = len(self.episode_selection_vars)
         selected = self._selected_episode_indices()
@@ -391,6 +437,8 @@ class AddTaskPage(ctk.CTkFrame):
             active_title = self.current_media.episodes[self.active_episode_index].title
         self.selection_summary_var.set(f"分集：已选择 {len(selected)} / {total}")
         self.quality_hint_var.set(f"画质基准：{active_title}")
+        self.selection_detail_var.set(self._selected_episode_preview(selected))
+        self._update_filename_preview()
         self._refresh_add_button_state()
 
     def _set_quality_waiting_state(self, text: str) -> None:
@@ -418,6 +466,49 @@ class AddTaskPage(ctk.CTkFrame):
 
         if hasattr(self, "add_button"):
             self.add_button.configure(text=text, state=state)
+
+    def _selected_quality(self) -> QualityOption | None:
+        if not self.current_qualities:
+            return None
+        quality_label = self.quality_combo.get().strip()
+        return next((item for item in self.current_qualities if item.label == quality_label), self.current_qualities[0])
+
+    def _filename_for_episode(self, episode_index: int, quality: QualityOption, selected_indices: list[int]) -> str:
+        assert self.current_media is not None
+        episode = self.current_media.episodes[episode_index]
+        return render_filename_template(
+            self.get_config().filename_template,
+            media_title=self.current_media.title,
+            episode=episode,
+            quality=quality,
+            index=selected_indices.index(episode_index) + 1,
+            total=len(selected_indices),
+        )
+
+    def _target_save_dir(self, config: AppConfig) -> Path:
+        save_dir = Path(config.save_path)
+        if config.organize_by_source and self.current_media is not None:
+            folder = self.current_media.folder_title or self.current_media.source_name or self.current_media.title
+            save_dir = save_dir / folder
+        return save_dir
+
+    def _update_filename_preview(self) -> None:
+        if not hasattr(self, "filename_preview_var"):
+            return
+        if not self.current_media:
+            self.filename_preview_var.set("文件名：等待解析")
+            return
+
+        selected_indices = self._selected_episode_indices()
+        quality = self._selected_quality()
+        if not selected_indices or quality is None:
+            self.filename_preview_var.set("文件名：选择分集和画质后预览")
+            return
+
+        first_name = self._filename_for_episode(selected_indices[0], quality, selected_indices)
+        suffix = f" 等 {len(selected_indices)} 个文件" if len(selected_indices) > 1 else ""
+        target_dir = self._target_save_dir(self.get_config())
+        self.filename_preview_var.set(f"保存到：{target_dir}\n文件名：{first_name}.mp4{suffix}")
 
     def _on_episode_checkbox_changed(self, index: int) -> None:
         selected = self._selected_episode_indices()
@@ -512,6 +603,12 @@ class AddTaskPage(ctk.CTkFrame):
         self.current_media = media
         self.parse_status_var.set("解析完成")
         self.media_title_var.set(media.title)
+        source_text = media.source_name or media.folder_title or "未知来源"
+        type_text = "番剧 / 合集" if media.media_type == "bangumi" or any(item.is_bangumi for item in media.episodes) else "普通视频"
+        self.media_info_var.set(
+            f"类型：{type_text}  |  来源：{source_text}  |  分集：{len(media.episodes)}\n"
+            f"保存分组：{media.folder_title or media.title}"
+        )
         self._populate_episode_selector(media)
         self._load_qualities_for_episode(media.default_episode_index)
 
@@ -521,6 +618,7 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_cache.clear()
         self.parse_status_var.set("解析失败")
         self.media_title_var.set(friendly_message)
+        self.media_info_var.set("请检查链接或登录状态后重试")
         self._reset_episode_selector("解析失败，暂无分集列表")
         self._set_quality_waiting_state("等待画质")
         messagebox.showerror("解析失败", friendly_message)
@@ -585,18 +683,20 @@ class AddTaskPage(ctk.CTkFrame):
 
         sessdata = self.refresh_auth_session().strip()
         config = self.get_config()
-        Path(config.save_path).mkdir(parents=True, exist_ok=True)
+        save_dir = self._target_save_dir(config)
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        quality_label = self.quality_combo.get().strip()
-        quality = next((item for item in self.current_qualities if item.label == quality_label), self.current_qualities[0])
+        quality = self._selected_quality() or self.current_qualities[0]
 
         for episode_index in selected_indices:
+            filename_stem = self._filename_for_episode(episode_index, quality, selected_indices)
             self.manager.create_task(
                 source_url=self.current_media.normalized_url,
                 episode=self.current_media.episodes[episode_index],
                 quality=quality,
-                save_dir=config.save_path,
+                save_dir=str(save_dir),
                 sessdata=sessdata or config.sessdata,
+                filename_stem=filename_stem,
             )
 
         self.emit_log(f"已创建 {len(selected_indices)} 个任务，画质 {quality.label}")

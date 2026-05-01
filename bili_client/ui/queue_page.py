@@ -360,6 +360,10 @@ class QueuePage(ctk.CTkFrame):
     def _on_filter_changed(self, _value: str) -> None:
         self._render_tasks(self._last_tasks)
 
+    def show_failed_tasks(self) -> None:
+        self.filter_segment.set("失败")
+        self._render_tasks(self._last_tasks)
+
     def update_snapshot(self, metrics: dict, tasks: list[dict]) -> None:
         total_tasks = (
             metrics["active_count"]

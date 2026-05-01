@@ -245,7 +245,12 @@ class MainWindow(ctk.CTk):
             on_open_dir=self._open_dir,
         )
         self.settings_page = SettingsPage(container, on_save_config=self._save_config, auth_service=self.auth_service)
-        self.log_page = LogPage(container, log_file_path=self.log_file_path, log_dir_path=self.log_dir_path)
+        self.log_page = LogPage(
+            container,
+            log_file_path=self.log_file_path,
+            log_dir_path=self.log_dir_path,
+            on_show_failed_tasks=self._show_failed_tasks,
+        )
 
         self.pages = {
             "parse": self.add_task_page,
@@ -372,6 +377,10 @@ class MainWindow(ctk.CTk):
             self.show_page("queue")
         else:
             messagebox.showinfo("没有可清理任务", "当前没有已结束的任务。")
+
+    def _show_failed_tasks(self) -> None:
+        self.show_page("queue")
+        self.queue_page.show_failed_tasks()
 
     def _open_dir(self, path: str) -> None:
         if not path:

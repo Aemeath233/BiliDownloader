@@ -42,9 +42,13 @@ class BilibiliApi:
 
         default_episode_index = 0
         title = "Bilibili 视频"
+        folder_title = ""
+        source_name = ""
+        media_type = "video"
         episodes: list[EpisodeInfo] = []
 
         if ep_match or ss_match:
+            media_type = "bangumi"
             if ep_match:
                 ep_id = ep_match.group(1)
                 api_url = f"https://api.bilibili.com/pgc/view/web/season?ep_id={ep_id}"
@@ -55,6 +59,8 @@ class BilibiliApi:
             data = self._load_json(api_url, sessdata)
             result = data["result"]
             title = result.get("season_title", title)
+            folder_title = title
+            source_name = title
             items = result.get("episodes", [])
 
             for index, item in enumerate(items):
@@ -77,6 +83,9 @@ class BilibiliApi:
             data = self._load_json(api_url, sessdata)
             result = data["data"]
             title = result.get("title", title)
+            owner = result.get("owner") or {}
+            source_name = str(owner.get("name") or "")
+            folder_title = source_name or title
             pages = result.get("pages", [])
 
             page_match = re.search(r"[?&]p=(\d+)", normalized_url) or re.search(r"[?&]p=(\d+)", text)
@@ -109,6 +118,9 @@ class BilibiliApi:
             title=title,
             episodes=episodes,
             default_episode_index=default_episode_index,
+            folder_title=safe_filename(folder_title or title),
+            source_name=source_name,
+            media_type=media_type,
         )
 
     def get_quality_options(self, episode: EpisodeInfo, sessdata: str = "") -> list[QualityOption]:
