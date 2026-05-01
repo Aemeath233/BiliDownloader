@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local environments
+.venv/
+
+# Build outputs
+build/
+dist/
+
+# Local IDE/project state
+.idea/
+
+# Runtime/local secrets
+sessdata.txt
+*.log
+
+# Bundled third-party binaries and downloaded archives
+vendor/ffmpeg/
+ffmpeg-master-*.zip
