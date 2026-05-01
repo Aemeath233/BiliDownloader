@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 from typing import Callable
 
@@ -9,6 +8,7 @@ import qrcode
 from PIL import Image
 
 from bili_client.services.auth_service import AuthError, AuthService, AuthSession, QrPollResult
+from bili_client.ui.async_tasks import UiTaskRunner
 from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS
 
 
@@ -27,6 +27,7 @@ class QrLoginDialog(ctk.CTkToplevel):
         self.on_success = on_success
         self._closed = False
         self._qr_image: ctk.CTkImage | None = None
+        self.ui_tasks = UiTaskRunner(self)
 
         self.title("扫码登录 Bilibili")
         self.geometry("460x620")
@@ -101,7 +102,7 @@ class QrLoginDialog(ctk.CTkToplevel):
         self.after(100, self._start_worker)
 
     def _start_worker(self) -> None:
-        threading.Thread(target=self._login_worker, daemon=True, name="bilibili-qr-login").start()
+        self.ui_tasks.run("bilibili-qr-login", self._login_worker)
 
     def _login_worker(self) -> None:
         try:

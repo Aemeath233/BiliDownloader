@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import threading
 import time
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -11,8 +10,9 @@ import customtkinter as ctk
 from bili_client.core.models import AppConfig
 from bili_client.services.auth_service import AuthService, AuthSession
 from bili_client.services.ffmpeg import FFmpegService
+from bili_client.ui.async_tasks import UiTaskRunner
 from bili_client.ui.auth_dialog import QrLoginDialog
-from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS
+from bili_client.ui.styles import BUTTON_HEIGHT, CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, STATE_COLORS, button_style
 
 
 APPEARANCE_LABELS = {
@@ -32,6 +32,7 @@ class SettingsPage(ctk.CTkFrame):
         self.show_sessdata_var = ctk.BooleanVar(value=False)
         self.organize_by_source_var = ctk.BooleanVar(value=False)
         self.cleanup_temp_files_var = ctk.BooleanVar(value=True)
+        self.ui_tasks = UiTaskRunner(self)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -95,10 +96,8 @@ class SettingsPage(ctk.CTkFrame):
             auth_actions,
             text="重新检查",
             command=self._check_auth_status,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
-            height=34,
+            **button_style("secondary"),
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
             state="normal" if self.auth_service is not None else "disabled",
         )
@@ -108,9 +107,8 @@ class SettingsPage(ctk.CTkFrame):
             auth_actions,
             text="扫码登录",
             command=self._open_qr_login,
-            fg_color=PALETTE["primary"],
-            hover_color=PALETTE["primary_hover"],
-            height=34,
+            **button_style("primary"),
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
             state="normal" if self.auth_service is not None else "disabled",
         )
@@ -120,10 +118,8 @@ class SettingsPage(ctk.CTkFrame):
             form,
             text="显示 SESSDATA 高级项",
             command=self._toggle_sessdata_visibility,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
-            height=34,
+            **button_style("secondary"),
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
         )
         self.toggle_sessdata_button.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
@@ -144,10 +140,8 @@ class SettingsPage(ctk.CTkFrame):
             form,
             text="选择保存目录",
             command=self._pick_save_dir,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
-            height=36,
+            **button_style("secondary"),
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
         ).grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 14))
 
@@ -173,10 +167,8 @@ class SettingsPage(ctk.CTkFrame):
             form,
             text="选择 FFmpeg",
             command=self._pick_ffmpeg,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
-            height=36,
+            **button_style("secondary"),
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
         ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
 
@@ -313,8 +305,7 @@ class SettingsPage(ctk.CTkFrame):
             self.action_bar,
             text="保存全局设置",
             command=self._save_settings,
-            fg_color=PALETTE["primary"],
-            hover_color=PALETTE["primary_hover"],
+            **button_style("primary"),
             height=40,
             width=142,
             corner_radius=CARD_RADIUS,
@@ -544,7 +535,7 @@ class SettingsPage(ctk.CTkFrame):
 
     def _on_auth_success(self, session: AuthSession) -> None:
         self._apply_auth_session(session, save=True)
-        self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
+        self._set_account_status("已登录", self._auth_session_detail(session), STATE_COLORS["success"])
 
     def _check_auth_status(self) -> None:
         if self.auth_service is None:
@@ -552,30 +543,32 @@ class SettingsPage(ctk.CTkFrame):
             return
 
         self.check_auth_button.configure(state="disabled", text="检查中...")
-        self._set_account_status("正在检查", "正在向 B 站确认登录状态", PALETTE["accent"])
+        self._set_account_status("正在检查", "正在向 B 站确认登录状态", STATE_COLORS["busy"])
         sessdata = self.sessdata_entry.get().strip()
-        threading.Thread(target=self._auth_check_worker, args=(sessdata,), daemon=True).start()
+        self.ui_tasks.run(
+            "auth-check",
+            lambda: self._ensure_auth_session(sessdata),
+            on_success=self._on_auth_check_success,
+            on_error=lambda exc: self._on_auth_check_failure(str(exc)),
+        )
 
-    def _auth_check_worker(self, sessdata: str) -> None:
-        try:
-            assert self.auth_service is not None
-            session = self.auth_service.ensure_latest_session(sessdata, force=True)
-            self.after(0, lambda: self._on_auth_check_success(session))
-        except Exception as exc:
-            self.after(0, lambda: self._on_auth_check_failure(str(exc)))
+    def _ensure_auth_session(self, sessdata: str) -> AuthSession | None:
+        if self.auth_service is None:
+            return None
+        return self.auth_service.ensure_latest_session(sessdata, force=True)
 
     def _on_auth_check_success(self, session: AuthSession | None) -> None:
         self.check_auth_button.configure(state="normal", text="重新检查")
         if session is None or not session.sessdata:
-            self._set_account_status("未登录", "没有检测到可用登录态，请扫码登录。", PALETTE["warning"])
+            self._set_account_status("未登录", "没有检测到可用登录态，请扫码登录。", STATE_COLORS["warning"])
             return
 
         self._apply_auth_session(session, save=True)
-        self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
+        self._set_account_status("已登录", self._auth_session_detail(session), STATE_COLORS["success"])
 
     def _on_auth_check_failure(self, message: str) -> None:
         self.check_auth_button.configure(state="normal", text="重新检查")
-        self._set_account_status("登录失效", message or "登录状态检查失败，请重新扫码登录。", PALETTE["error"])
+        self._set_account_status("登录失效", message or "登录状态检查失败，请重新扫码登录。", STATE_COLORS["error"])
 
     def _apply_auth_session(self, session: AuthSession, save: bool) -> None:
         self.sessdata_entry.delete(0, "end")
@@ -589,12 +582,12 @@ class SettingsPage(ctk.CTkFrame):
             return
         session = self.auth_service.load_session() if self.auth_service is not None else None
         if session is not None and session.sessdata:
-            self._set_account_status("已登录", self._auth_session_detail(session), PALETTE["success"])
+            self._set_account_status("已登录", self._auth_session_detail(session), STATE_COLORS["success"])
             return
         if sessdata.strip():
-            self._set_account_status("已保存登录态", "检测到旧版 SESSDATA，可点击重新检查确认是否可用。", PALETTE["warning"])
+            self._set_account_status("已保存登录态", "检测到旧版 SESSDATA，可点击重新检查确认是否可用。", STATE_COLORS["warning"])
             return
-        self._set_account_status("未登录", "扫码登录后会自动保存登录状态。", PALETTE["warning"])
+        self._set_account_status("未登录", "扫码登录后会自动保存登录状态。", STATE_COLORS["warning"])
 
     def _set_account_status(self, title: str, detail: str, color) -> None:
         self.account_state_label.configure(text=title, text_color=color)

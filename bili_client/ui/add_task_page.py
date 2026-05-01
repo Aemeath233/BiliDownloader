@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 from pathlib import Path
 from tkinter import messagebox
@@ -10,9 +9,10 @@ import customtkinter as ctk
 from bili_client.core.errors import humanize_error
 from bili_client.core.naming import render_filename_template
 from bili_client.core.models import AppConfig, MediaParseResult, QualityOption
-from bili_client.services.bili_api import BiliApiError, BilibiliApi
+from bili_client.services.bili_api import BilibiliApi
 from bili_client.services.download_manager import DownloadManager
-from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS
+from bili_client.ui.async_tasks import UiTaskRunner
+from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, STATE_COLORS, button_style
 
 
 class AddTaskPage(ctk.CTkFrame):
@@ -35,6 +35,7 @@ class AddTaskPage(ctk.CTkFrame):
         self.show_queue_page = show_queue_page
         self.open_settings_page = open_settings_page
         self.refresh_auth_session = refresh_auth_session or (lambda: self.get_config().sessdata.strip())
+        self.ui_tasks = UiTaskRunner(self)
 
         self.current_media: MediaParseResult | None = None
         self.current_qualities: list[QualityOption] = []
@@ -105,37 +106,36 @@ class AddTaskPage(ctk.CTkFrame):
             action_row,
             text="解析链接",
             command=self._parse_current_url,
-            fg_color=PALETTE["primary"],
-            hover_color=PALETTE["primary_hover"],
+            **button_style("primary"),
             height=40,
             corner_radius=CARD_RADIUS,
             font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
         )
         self.parse_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
-        ctk.CTkButton(
+        self.clear_button = ctk.CTkButton(
             action_row,
             text="清空",
             command=self._clear_input,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
             width=86,
             height=40,
             corner_radius=CARD_RADIUS,
-        ).grid(row=0, column=1, sticky="e")
+        )
+        self.clear_button.grid(row=0, column=1, sticky="e")
 
         status_panel = ctk.CTkFrame(panel, fg_color=PALETTE["surface"], corner_radius=CARD_RADIUS)
         status_panel.grid(row=4, column=0, sticky="new", padx=18, pady=(18, 12))
         status_panel.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(
+        self.parse_status_label = ctk.CTkLabel(
             status_panel,
             textvariable=self.parse_status_var,
             anchor="w",
-            text_color=PALETTE["accent"],
+            text_color=STATE_COLORS["idle"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
-        ).grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 3))
+        )
+        self.parse_status_label.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 3))
         ctk.CTkLabel(
             status_panel,
             textvariable=self.media_title_var,
@@ -154,6 +154,14 @@ class AddTaskPage(ctk.CTkFrame):
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 12))
+
+        self.parse_progress = ctk.CTkProgressBar(
+            status_panel,
+            height=5,
+            mode="indeterminate",
+            corner_radius=4,
+            progress_color=PALETTE["primary"],
+        )
 
         config_panel = ctk.CTkFrame(panel, fg_color=PALETTE["surface_alt"], corner_radius=CARD_RADIUS)
         config_panel.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 18))
@@ -176,9 +184,7 @@ class AddTaskPage(ctk.CTkFrame):
             width=70,
             height=30,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=1, sticky="e")
 
         self.config_summary_label = ctk.CTkLabel(
@@ -237,9 +243,7 @@ class AddTaskPage(ctk.CTkFrame):
                 command=handler,
                 height=32,
                 corner_radius=CARD_RADIUS,
-                fg_color=PALETTE["secondary"],
-                hover_color=PALETTE["secondary_hover"],
-                text_color=PALETTE["text"],
+                **button_style("secondary"),
             ).grid(row=0, column=column, sticky="ew", padx=(0, 6) if column < 2 else 0)
 
         self.episode_scroll = ctk.CTkScrollableFrame(
@@ -303,8 +307,7 @@ class AddTaskPage(ctk.CTkFrame):
             quality_panel,
             text="先解析链接",
             command=self._add_task_from_selection,
-            fg_color=PALETTE["primary"],
-            hover_color=PALETTE["primary_hover"],
+            **button_style("primary"),
             height=42,
             state="disabled",
             corner_radius=CARD_RADIUS,
@@ -342,9 +345,7 @@ class AddTaskPage(ctk.CTkFrame):
         self.current_qualities = []
         self.quality_cache.clear()
         self.preferred_quality_label = None
-        self.parse_status_var.set("等待链接")
-        self.media_title_var.set("尚未解析")
-        self.media_info_var.set("解析完成后会显示视频信息")
+        self._set_parse_state("idle", "等待链接", "尚未解析", "解析完成后会显示视频信息")
         self._reset_episode_selector("解析完成后会显示可下载分集")
         self._set_quality_waiting_state("等待画质")
 
@@ -445,6 +446,31 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_combo.configure(values=[text], state="disabled")
         self.quality_combo.set(text)
         self.current_qualities = []
+        self._update_filename_preview()
+        self._refresh_add_button_state()
+
+    def _set_parse_state(self, state: str, status: str, title: str | None = None, info: str | None = None) -> None:
+        self.parse_status_var.set(status)
+        if title is not None:
+            self.media_title_var.set(title)
+        if info is not None:
+            self.media_info_var.set(info)
+        if hasattr(self, "parse_status_label"):
+            self.parse_status_label.configure(text_color=STATE_COLORS.get(state, STATE_COLORS["idle"]))
+
+    def _set_parse_busy(self, busy: bool) -> None:
+        if busy:
+            self.parse_button.configure(state="disabled", text="正在解析...")
+            self.clear_button.configure(state="disabled")
+            self.add_button.configure(state="disabled")
+            self.parse_progress.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 12))
+            self.parse_progress.start()
+            return
+
+        self.parse_progress.stop()
+        self.parse_progress.grid_forget()
+        self.parse_button.configure(state="normal", text="解析链接")
+        self.clear_button.configure(state="normal")
         self._refresh_add_button_state()
 
     def _refresh_add_button_state(self) -> None:
@@ -573,41 +599,41 @@ class AddTaskPage(ctk.CTkFrame):
             self._last_auto_parse_url = extracted_url
 
         self._is_parsing = True
-        self.parse_button.configure(state="disabled", text="解析中...")
-        self.add_button.configure(state="disabled")
-        self.parse_status_var.set("正在解析")
-        self.media_title_var.set("正在读取视频信息...")
+        self._set_parse_busy(True)
+        self._set_parse_state("busy", "正在解析", "正在读取视频信息...", "正在连接 B 站接口并读取分集")
         self._reset_episode_selector("正在解析分集...")
         self._set_quality_waiting_state("正在读取画质")
 
-        threading.Thread(target=self._parse_worker, args=(content,), daemon=True).start()
+        self.ui_tasks.run(
+            "parse-media",
+            lambda: self._parse_media(content),
+            on_success=self._on_parse_success,
+            on_error=lambda exc: self._on_parse_failure(str(exc)),
+            on_finally=self._finish_parse_request,
+        )
 
-    def _parse_worker(self, content: str) -> None:
-        try:
-            sessdata = self.refresh_auth_session().strip()
-            media = self.api.parse_media(content, sessdata=sessdata)
-            self.after(0, lambda: self._on_parse_success(media))
-            self.emit_log(f"解析完成：{media.title}，共 {len(media.episodes)} 个条目")
-        except BiliApiError as exc:
-            self.after(0, lambda: self._on_parse_failure(str(exc)))
-        except Exception as exc:
-            self.after(0, lambda: self._on_parse_failure(str(exc)))
-        finally:
-            self.after(0, self._finish_parse_request)
+    def _parse_media(self, content: str) -> MediaParseResult:
+        sessdata = self.refresh_auth_session().strip()
+        media = self.api.parse_media(content, sessdata=sessdata)
+        self.emit_log(f"解析完成：{media.title}，共 {len(media.episodes)} 个条目")
+        return media
 
     def _finish_parse_request(self) -> None:
         self._is_parsing = False
-        self.parse_button.configure(state="normal", text="解析链接")
+        self._set_parse_busy(False)
 
     def _on_parse_success(self, media: MediaParseResult) -> None:
         self.current_media = media
-        self.parse_status_var.set("解析完成")
-        self.media_title_var.set(media.title)
         source_text = media.source_name or media.folder_title or "未知来源"
         type_text = "番剧 / 合集" if media.media_type == "bangumi" or any(item.is_bangumi for item in media.episodes) else "普通视频"
-        self.media_info_var.set(
-            f"类型：{type_text}  |  来源：{source_text}  |  分集：{len(media.episodes)}\n"
-            f"保存分组：{media.folder_title or media.title}"
+        self._set_parse_state(
+            "success",
+            "解析完成",
+            media.title,
+            (
+                f"类型：{type_text}  |  来源：{source_text}  |  分集：{len(media.episodes)}\n"
+                f"保存分组：{media.folder_title or media.title}"
+            ),
         )
         self._populate_episode_selector(media)
         self._load_qualities_for_episode(media.default_episode_index)
@@ -616,9 +642,7 @@ class AddTaskPage(ctk.CTkFrame):
         friendly_message = humanize_error(message)
         self.current_media = None
         self.quality_cache.clear()
-        self.parse_status_var.set("解析失败")
-        self.media_title_var.set(friendly_message)
-        self.media_info_var.set("请检查链接或登录状态后重试")
+        self._set_parse_state("error", "解析失败", friendly_message, "请检查链接或登录状态后重试")
         self._reset_episode_selector("解析失败，暂无分集列表")
         self._set_quality_waiting_state("等待画质")
         messagebox.showerror("解析失败", friendly_message)
@@ -642,15 +666,16 @@ class AddTaskPage(ctk.CTkFrame):
         self._quality_request_token = token
         episode = self.current_media.episodes[episode_index]
         self._set_quality_waiting_state("正在读取画质")
-        threading.Thread(target=self._quality_worker, args=(token, episode), daemon=True).start()
+        self.ui_tasks.run(
+            "load-qualities",
+            lambda: self._load_quality_options(episode),
+            on_success=lambda qualities, token=token: self._on_quality_success(token, qualities),
+            on_error=lambda exc, token=token: self._on_quality_failure(token, str(exc)),
+        )
 
-    def _quality_worker(self, token: int, episode) -> None:
-        try:
-            sessdata = self.refresh_auth_session().strip()
-            qualities = self.api.get_quality_options(episode, sessdata=sessdata)
-            self.after(0, lambda: self._on_quality_success(token, qualities))
-        except Exception as exc:
-            self.after(0, lambda: self._on_quality_failure(token, str(exc)))
+    def _load_quality_options(self, episode) -> list[QualityOption]:
+        sessdata = self.refresh_auth_session().strip()
+        return self.api.get_quality_options(episode, sessdata=sessdata)
 
     def _on_quality_success(self, token: int, qualities: list[QualityOption]) -> None:
         if token != self._quality_request_token:
@@ -666,6 +691,7 @@ class AddTaskPage(ctk.CTkFrame):
         if token != self._quality_request_token:
             return
         self._set_quality_waiting_state("读取失败")
+        self.quality_hint_var.set("画质读取失败")
         messagebox.showerror("读取画质失败", humanize_error(message))
 
     def _add_task_from_selection(self) -> None:

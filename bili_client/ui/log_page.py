@@ -6,7 +6,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS
+from bili_client.ui.styles import BUTTON_HEIGHT, CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, button_style
 
 
 LOG_FILTERS = {
@@ -74,44 +74,36 @@ class LogPage(ctk.CTkFrame):
             text="复制日志",
             command=self.copy_visible_logs,
             width=88,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=1, padx=(0, 8))
         ctk.CTkButton(
             action_row,
             text="打开文件",
             command=self.open_log_file,
             width=88,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=2, padx=(0, 8))
         ctk.CTkButton(
             action_row,
             text="打开目录",
             command=self.open_log_dir,
             width=88,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=3, padx=(0, 8))
         ctk.CTkButton(
             action_row,
             text="清空界面",
             command=self.clear_logs,
             width=88,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=4)
 
         filter_row = ctk.CTkFrame(panel, fg_color="transparent")
@@ -153,11 +145,9 @@ class LogPage(ctk.CTkFrame):
             text="查看失败任务",
             command=self._show_failed_tasks,
             width=108,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
             state="disabled",
         )
         self.failed_tasks_button.grid(row=0, column=2, sticky="e")

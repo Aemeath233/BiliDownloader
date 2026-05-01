@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import queue
-import threading
 from dataclasses import replace
 from pathlib import Path
 from tkinter import messagebox
@@ -17,6 +16,7 @@ from bili_client.services.config_store import ConfigStore
 from bili_client.services.download_manager import DownloadManager
 from bili_client.services.ffmpeg import FFmpegService
 from bili_client.ui.add_task_page import AddTaskPage
+from bili_client.ui.async_tasks import UiTaskRunner
 from bili_client.ui.log_page import LogPage
 from bili_client.ui.queue_page import QueuePage
 from bili_client.ui.settings_page import SettingsPage
@@ -66,6 +66,7 @@ class MainWindow(ctk.CTk):
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         self.pages: dict[str, ctk.CTkFrame] = {}
         self._closing = False
+        self.ui_tasks = UiTaskRunner(self)
 
         self.title("BiliDownloader")
         self.geometry("1480x900")
@@ -305,11 +306,7 @@ class MainWindow(ctk.CTk):
     def _start_silent_auth_check(self) -> None:
         if self.auth_service is None:
             return
-        threading.Thread(
-            target=lambda: self._refresh_auth_session(force=True),
-            daemon=True,
-            name="auth-startup-check",
-        ).start()
+        self.ui_tasks.run("auth-startup-check", lambda: self._refresh_auth_session(force=True))
 
     def _refresh_auth_session(self, force: bool = False) -> str:
         if self.auth_service is None:
@@ -449,11 +446,4 @@ class MainWindow(ctk.CTk):
         self._closing = True
         self.protocol("WM_DELETE_WINDOW", lambda: None)
         self.withdraw()
-        threading.Thread(target=self._shutdown_then_destroy, daemon=True, name="app-shutdown").start()
-
-    def _shutdown_then_destroy(self) -> None:
-        self.manager.shutdown()
-        try:
-            self.after(0, self.destroy)
-        except RuntimeError:
-            pass
+        self.ui_tasks.run("app-shutdown", self.manager.shutdown, on_success=lambda _result: self.destroy())

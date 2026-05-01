@@ -5,7 +5,7 @@ from pathlib import Path
 import customtkinter as ctk
 
 from bili_client.core.formatters import format_bytes, format_percent, format_speed, format_status
-from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, STATUS_STYLES
+from bili_client.ui.styles import BUTTON_HEIGHT, CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, STATUS_STYLES, button_style
 
 
 FILTER_OPTIONS = {
@@ -91,9 +91,7 @@ class TaskCard(ctk.CTkFrame):
             height=28,
             command=lambda: self.on_open_dir(self.save_dir),
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         )
         self.open_button.grid(row=0, column=2, sticky="e", padx=(0, 8), pady=(12, 4))
 
@@ -104,9 +102,7 @@ class TaskCard(ctk.CTkFrame):
             height=28,
             command=lambda: self.on_retry(self.task_id),
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         )
         self.retry_button.grid(row=0, column=3, sticky="e", padx=(0, 8), pady=(12, 4))
 
@@ -117,9 +113,7 @@ class TaskCard(ctk.CTkFrame):
             height=28,
             command=lambda: self.on_remove(self.task_id),
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         )
         self.remove_button.grid(row=0, column=4, sticky="e", padx=(0, 8), pady=(12, 4))
 
@@ -130,9 +124,7 @@ class TaskCard(ctk.CTkFrame):
             height=28,
             command=lambda: self.on_cancel(self.task_id),
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["danger"],
-            hover_color=PALETTE["danger_hover"],
-            text_color=PALETTE["text_inverse"],
+            **button_style("danger"),
             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
         )
         self.cancel_button.grid(row=0, column=5, sticky="e", padx=(0, 14), pady=(12, 4))
@@ -202,7 +194,10 @@ class TaskCard(ctk.CTkFrame):
         self.stats_label.configure(text=f"{downloaded} / {total}  |  {speed}  |  {format_queue_position(snapshot)}")
 
         self.open_button.configure(state="normal" if self.save_dir else "disabled")
-        self.retry_button.configure(state="normal" if snapshot.get("can_retry") else "disabled")
+        if snapshot.get("can_retry"):
+            self.retry_button.configure(state="normal", **button_style("primary"))
+        else:
+            self.retry_button.configure(state="disabled", **button_style("secondary"))
         self.remove_button.configure(state="normal" if snapshot.get("can_remove") else "disabled")
         self.cancel_button.configure(
             state="normal" if snapshot["can_cancel"] else "disabled",
@@ -309,11 +304,9 @@ class QueuePage(ctk.CTkFrame):
             text="重试失败/取消",
             command=self.on_retry_failed,
             width=116,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=1, padx=(0, 8))
 
         ctk.CTkButton(
@@ -321,11 +314,9 @@ class QueuePage(ctk.CTkFrame):
             text="清理已结束",
             command=self.on_clear_finished,
             width=104,
-            height=34,
+            height=BUTTON_HEIGHT,
             corner_radius=CARD_RADIUS,
-            fg_color=PALETTE["secondary"],
-            hover_color=PALETTE["secondary_hover"],
-            text_color=PALETTE["text"],
+            **button_style("secondary"),
         ).grid(row=0, column=2)
 
         self.task_scroll = ctk.CTkScrollableFrame(list_panel, fg_color="transparent")

@@ -13,6 +13,7 @@ def dual(light: str, dark: str) -> tuple[str, str]:
 FONT_FAMILY = "Microsoft YaHei UI"
 CARD_RADIUS = 10
 PANEL_RADIUS = 14
+BUTTON_HEIGHT = 36
 
 
 PALETTE = {
@@ -53,3 +54,33 @@ STATUS_STYLES = {
     "failed": (dual("#fee2e2", "#4a1515"), dual("#991b1b", "#fecaca")),
     "canceled": (dual("#e5e7eb", "#2f3a4a"), dual("#4b5563", "#d1d5db")),
 }
+
+
+STATE_COLORS = {
+    "idle": PALETTE["muted"],
+    "busy": PALETTE["accent"],
+    "success": PALETTE["success"],
+    "warning": PALETTE["warning"],
+    "error": PALETTE["error"],
+}
+
+
+def button_style(variant: str = "secondary") -> dict:
+    styles = {
+        "primary": {
+            "fg_color": PALETTE["primary"],
+            "hover_color": PALETTE["primary_hover"],
+            "text_color": PALETTE["text_inverse"],
+        },
+        "secondary": {
+            "fg_color": PALETTE["secondary"],
+            "hover_color": PALETTE["secondary_hover"],
+            "text_color": PALETTE["text"],
+        },
+        "danger": {
+            "fg_color": PALETTE["danger"],
+            "hover_color": PALETTE["danger_hover"],
+            "text_color": PALETTE["text_inverse"],
+        },
+    }
+    return styles.get(variant, styles["secondary"])

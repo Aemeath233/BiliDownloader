@@ -35,13 +35,14 @@ class ConfigStore:
                 filename_template=str(data.get("filename_template", config.filename_template)).strip()
                 or config.filename_template,
                 cleanup_temp_files=bool(data.get("cleanup_temp_files", config.cleanup_temp_files)),
-                speed_limit_mb=float(data.get("speed_limit_mb", data.get("speed_limit", config.speed_limit_mb)) or 0),
+                speed_limit_mb=float(data.get("speed_limit_mb", config.speed_limit_mb) or 0),
                 max_concurrent_tasks=max(1, int(data.get("max_concurrent_tasks", config.max_concurrent_tasks) or 1)),
                 ffmpeg_path=str(data.get("ffmpeg_path", config.ffmpeg_path)).strip() or "ffmpeg",
                 appearance_mode=str(data.get("appearance_mode", config.appearance_mode)).strip() or "system",
             )
 
         Path(config.save_path).mkdir(parents=True, exist_ok=True)
+        self.save(config)
         return config
 
     def save(self, config: AppConfig) -> None:
