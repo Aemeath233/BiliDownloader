@@ -3,6 +3,15 @@
 [![Source checks](https://github.com/Aemeath233/BiliDownloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Aemeath233/BiliDownloader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+> [!WARNING]
+> **⚠️ 使用声明：本项目仅供学习与技术交流**
+>
+> 请勿用于商业运营、收费下载服务或其他牟利用途。请仅下载和保存你有权使用的内容，未经权利人许可，请勿转载、售卖或传播所下载的视频。
+>
+> 请尊重创作者权益，遵守 B 站的平台规则和适用法律法规。项目源码的公开不代表对任何视频内容的授权。
+>
+> 本声明为使用倡议；源码授权仍以 [MIT 许可证](LICENSE) 为准，不构成对该许可证新增的非商业限制。
+
 面向 Windows 的 B 站视频下载客户端。支持分享链接、BV / ep / ss 编号、分集与画质选择、下载队列、扫码登录和全局限速。
 
 **普通用户下载 [Release 便携版](https://github.com/Aemeath233/BiliDownloader/releases/latest)，开发者按下面的源码教程运行。源码仓库不携带 Python 环境或 FFmpeg。**
