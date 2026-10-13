@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import threading
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from bili_client.core.errors import humanize_error
 from bili_client.core.models import (
@@ -23,13 +26,22 @@ from bili_client.services.ffmpeg import FFmpegService
 from bili_client.services.rate_limiter import GlobalRateLimiter
 from bili_client.services.task_store import TaskStore
 
-
 TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELED}
 RETRYABLE_STATUSES = {TaskStatus.FAILED, TaskStatus.CANCELED}
 
 
 class DownloadCancelled(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadTaskSpec:
+    source_url: str
+    episode: EpisodeInfo
+    quality: QualityOption
+    save_dir: str
+    sessdata: str = ""
+    filename_stem: str | None = None
 
 
 class DownloadManager:
@@ -56,7 +68,8 @@ class DownloadManager:
         self._workers: dict[str, threading.Thread] = {}
         self._stop_event = threading.Event()
 
-        self._max_concurrent_tasks = max(1, int(config.max_concurrent_tasks))
+        self._steady_mode = bool(config.steady_mode)
+        self._max_concurrent_tasks = self._effective_max_concurrent_tasks(config)
         self._cleanup_temp_files = bool(config.cleanup_temp_files)
         self._rate_limiter = GlobalRateLimiter(int(max(0.0, config.speed_limit_mb) * 1024 * 1024))
         self.ffmpeg.set_command(config.ffmpeg_path)
@@ -71,14 +84,25 @@ class DownloadManager:
 
     def update_config(self, config: AppConfig) -> None:
         with self._config_lock:
-            self._max_concurrent_tasks = max(1, int(config.max_concurrent_tasks))
+            self._steady_mode = bool(config.steady_mode)
+            self._max_concurrent_tasks = self._effective_max_concurrent_tasks(config)
             self._cleanup_temp_files = bool(config.cleanup_temp_files)
             self._rate_limiter.update_limit(int(max(0.0, config.speed_limit_mb) * 1024 * 1024))
             self.ffmpeg.set_command(config.ffmpeg_path)
+            strategy = "稳妥模式" if self._steady_mode else "标准模式"
+        with self._tasks_lock:
+            for task in self._tasks.values():
+                task.sessdata = config.sessdata.strip()
         self.logger(
-            f"运行配置已更新：并发任务 {self._max_concurrent_tasks}，"
+            f"运行配置已更新：{strategy}，并发任务 {self._max_concurrent_tasks}，"
             f"全局限速 {config.speed_limit_mb or 0:.2f} MB/s"
         )
+
+    def _effective_max_concurrent_tasks(self, config: AppConfig) -> int:
+        requested = min(16, max(1, int(config.max_concurrent_tasks)))
+        if bool(config.steady_mode):
+            return min(requested, 2)
+        return requested
 
     def create_task(
         self,
@@ -89,30 +113,69 @@ class DownloadManager:
         sessdata: str,
         filename_stem: str | None = None,
     ) -> str:
-        task_id = uuid.uuid4().hex[:10]
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        output_stem = safe_filename(filename_stem or episode.title)
-        output_path = self._next_available_path(save_path / f"{output_stem}.mp4")
+        return self.create_tasks(
+            [
+                DownloadTaskSpec(
+                    source_url=source_url,
+                    episode=episode,
+                    quality=quality,
+                    save_dir=save_dir,
+                    sessdata=sessdata,
+                    filename_stem=filename_stem,
+                )
+            ]
+        )[0]
 
-        task = DownloadTask(
-            task_id=task_id,
-            source_url=source_url,
-            output_path=str(output_path),
-            save_dir=str(save_path),
-            sessdata=sessdata.strip(),
-            episode=episode,
-            quality=quality,
-            title=episode.title,
-        )
+    def create_tasks(self, specs: list[DownloadTaskSpec]) -> list[str]:
+        if not specs:
+            return []
 
+        prepared: list[tuple[DownloadTaskSpec, Path, str]] = []
+        for spec in specs:
+            save_path = Path(spec.save_dir)
+            save_path.mkdir(parents=True, exist_ok=True)
+            output_stem = safe_filename(spec.filename_stem or spec.episode.title)
+            prepared.append((spec, save_path, output_stem))
+
+        created_tasks: list[DownloadTask] = []
         with self._tasks_lock:
-            self._tasks[task_id] = task
-            self._queue.append(task_id)
-            self._save_tasks_locked()
+            reserved_paths = {
+                self._path_key(Path(task.output_path))
+                for task in self._tasks.values()
+                if task.status not in TERMINAL_STATUSES or Path(task.output_path).exists()
+            }
+            try:
+                for spec, save_path, output_stem in prepared:
+                    task_id = uuid.uuid4().hex
+                    output_path = self._next_available_path(
+                        save_path / f"{output_stem}.mp4",
+                        reserved_paths=reserved_paths,
+                    )
+                    reserved_paths.add(self._path_key(output_path))
+                    task = DownloadTask(
+                        task_id=task_id,
+                        source_url=spec.source_url,
+                        output_path=str(output_path),
+                        save_dir=str(save_path),
+                        sessdata=spec.sessdata.strip(),
+                        episode=spec.episode,
+                        quality=spec.quality,
+                        title=spec.episode.title,
+                    )
+                    self._tasks[task_id] = task
+                    self._queue.append(task_id)
+                    created_tasks.append(task)
+                self._save_tasks_locked()
+            except Exception:
+                created_ids = {task.task_id for task in created_tasks}
+                self._queue = [task_id for task_id in self._queue if task_id not in created_ids]
+                for task_id in created_ids:
+                    self._tasks.pop(task_id, None)
+                raise
 
-        self.logger(f"任务已加入队列：{task.title} [{quality.label}]")
-        return task_id
+        for task in created_tasks:
+            self.logger(f"任务已加入队列：{task.title} [{task.quality.label}]")
+        return [task.task_id for task in created_tasks]
 
     def cancel_task(self, task_id: str) -> bool:
         with self._tasks_lock:
@@ -158,32 +221,23 @@ class DownloadManager:
         retry_statuses = statuses or RETRYABLE_STATUSES
         with self._tasks_lock:
             specs = [
-                (
-                    task.source_url,
-                    task.episode,
-                    task.quality,
-                    task.save_dir,
-                    task.sessdata,
-                    task.title,
-                    Path(task.output_path).stem,
+                DownloadTaskSpec(
+                    source_url=task.source_url,
+                    episode=task.episode,
+                    quality=task.quality,
+                    save_dir=task.save_dir,
+                    sessdata=task.sessdata,
+                    filename_stem=Path(task.output_path).stem,
                 )
                 for task in self._tasks.values()
                 if task.status in retry_statuses
             ]
 
-        for source_url, episode, quality, save_dir, sessdata, _title, filename_stem in specs:
-            self.create_task(
-                source_url=source_url,
-                episode=episode,
-                quality=quality,
-                save_dir=save_dir,
-                sessdata=sessdata,
-                filename_stem=filename_stem,
-            )
+        created_ids = self.create_tasks(specs)
 
-        if specs:
-            self.logger(f"已重新加入 {len(specs)} 个失败/取消任务")
-        return len(specs)
+        if created_ids:
+            self.logger(f"已重新加入 {len(created_ids)} 个失败/取消任务")
+        return len(created_ids)
 
     def retry_task(self, task_id: str) -> str | None:
         with self._tasks_lock:
@@ -239,24 +293,32 @@ class DownloadManager:
             queue_positions = {task_id: index + 1 for index, task_id in enumerate(self._queue)}
             ordered_tasks = sorted(self._tasks.values(), key=lambda item: self._task_sort_key(item, queue_positions))
             tasks = [self._serialize_task(task, queue_positions.get(task.task_id)) for task in ordered_tasks]
-            active_count = len(self._active_ids)
-            queued_count = sum(1 for task in self._tasks.values() if task.status == TaskStatus.QUEUED)
-            completed_count = sum(1 for task in self._tasks.values() if task.status == TaskStatus.COMPLETED)
-            failed_count = sum(1 for task in self._tasks.values() if task.status == TaskStatus.FAILED)
-            canceled_count = sum(1 for task in self._tasks.values() if task.status == TaskStatus.CANCELED)
-            total_speed = sum(task.progress.speed_bps for task in self._tasks.values() if task.status == TaskStatus.DOWNLOADING)
+            metrics = self._metrics_locked()
 
         return {
             "tasks": tasks,
-            "metrics": {
-                "active_count": active_count,
-                "queued_count": queued_count,
-                "completed_count": completed_count,
-                "failed_count": failed_count,
-                "canceled_count": canceled_count,
-                "total_speed_bps": total_speed,
-                "speed_limit_bps": self._rate_limiter.get_limit(),
-            },
+            "metrics": metrics,
+        }
+
+    def metrics(self) -> dict:
+        with self._tasks_lock:
+            return self._metrics_locked()
+
+    def _metrics_locked(self) -> dict:
+        counts = {status: 0 for status in TaskStatus}
+        total_speed = 0.0
+        for task in self._tasks.values():
+            counts[task.status] += 1
+            if task.status == TaskStatus.DOWNLOADING:
+                total_speed += task.progress.speed_bps
+        return {
+            "active_count": len(self._active_ids),
+            "queued_count": counts[TaskStatus.QUEUED],
+            "completed_count": counts[TaskStatus.COMPLETED],
+            "failed_count": counts[TaskStatus.FAILED],
+            "canceled_count": counts[TaskStatus.CANCELED],
+            "total_speed_bps": total_speed,
+            "speed_limit_bps": self._rate_limiter.get_limit(),
         }
 
     def shutdown(self) -> None:
@@ -297,6 +359,8 @@ class DownloadManager:
         dirty = False
         with self._tasks_lock:
             for payload in self.task_store.load():
+                if "sessdata" in payload:
+                    dirty = True
                 task = self._task_from_payload(payload)
                 if task is None or task.task_id in self._tasks:
                     continue
@@ -331,7 +395,6 @@ class DownloadManager:
             "source_url": task.source_url,
             "output_path": task.output_path,
             "save_dir": task.save_dir,
-            "sessdata": task.sessdata,
             "title": task.title,
             "status": task.status.value,
             "message": task.message,
@@ -362,6 +425,9 @@ class DownloadManager:
 
     def _task_from_payload(self, payload: dict) -> DownloadTask | None:
         try:
+            task_id = str(payload.get("task_id") or uuid.uuid4().hex[:10])
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", task_id):
+                return None
             title = str(payload.get("title") or "未命名任务")
             save_dir = str(payload.get("save_dir") or Path.cwd())
             output_path = str(payload.get("output_path") or Path(save_dir) / f"{title}.mp4")
@@ -408,11 +474,11 @@ class DownloadManager:
             finished_at = float(payload["finished_at"]) if payload.get("finished_at") is not None else None
 
             return DownloadTask(
-                task_id=str(payload.get("task_id") or uuid.uuid4().hex[:10]),
+                task_id=task_id,
                 source_url=str(payload.get("source_url") or ""),
                 output_path=output_path,
                 save_dir=save_dir,
-                sessdata=str(payload.get("sessdata") or ""),
+                sessdata="",
                 episode=episode,
                 quality=quality,
                 title=title,
@@ -424,11 +490,12 @@ class DownloadManager:
                 finished_at=finished_at,
                 progress=progress,
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
 
-    def _next_available_path(self, candidate: Path) -> Path:
-        if not candidate.exists():
+    def _next_available_path(self, candidate: Path, reserved_paths: set[str] | None = None) -> Path:
+        reserved = reserved_paths or set()
+        if not candidate.exists() and self._path_key(candidate) not in reserved:
             return candidate
 
         stem = candidate.stem
@@ -437,9 +504,13 @@ class DownloadManager:
         counter = 1
         while True:
             next_path = parent / f"{stem} ({counter}){suffix}"
-            if not next_path.exists():
+            if not next_path.exists() and self._path_key(next_path) not in reserved:
                 return next_path
             counter += 1
+
+    @staticmethod
+    def _path_key(path: Path) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
 
     def _scheduler_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -454,7 +525,9 @@ class DownloadManager:
                         task_id = None
 
             if task_id:
-                worker = threading.Thread(target=self._run_task, args=(task_id,), daemon=True, name=f"download-{task_id}")
+                worker = threading.Thread(
+                    target=self._run_task, args=(task_id,), daemon=True, name=f"download-{task_id}"
+                )
                 with self._tasks_lock:
                     self._workers[task_id] = worker
                 worker.start()
@@ -469,11 +542,11 @@ class DownloadManager:
 
         cancel_event = task.cancel_event
         temp_dir = Path(task.save_dir) / ".bili_client" / task.task_id
-        temp_dir.mkdir(parents=True, exist_ok=True)
         video_path = temp_dir / "video.m4s"
         audio_path = temp_dir / "audio.m4s"
 
         try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
             self._ensure_not_cancelled(cancel_event)
             self._set_status(task_id, TaskStatus.PREPARING, "解析流地址")
             video_stream, audio_stream, sessdata = self._get_streams_for_task(task_id, task)
@@ -558,6 +631,7 @@ class DownloadManager:
         sessdata = self._refresh_task_sessdata(task_id, task, force=False)
         try:
             video_stream, audio_stream = self.api.get_streams(task.episode, task.quality.qn, sessdata)
+            self._apply_actual_quality(task_id, task, video_stream)
             return video_stream, audio_stream, sessdata
         except BiliApiError:
             if task.quality.qn < 80 or self.auth_refresher is None:
@@ -569,7 +643,23 @@ class DownloadManager:
 
             self.logger(f"高画质取流失败，已刷新登录态后重试一次：{task.title}")
             video_stream, audio_stream = self.api.get_streams(task.episode, task.quality.qn, refreshed_sessdata)
+            self._apply_actual_quality(task_id, task, video_stream)
             return video_stream, audio_stream, refreshed_sessdata
+
+    def _apply_actual_quality(self, task_id: str, task: DownloadTask, video_stream: StreamInfo) -> None:
+        actual_qn = int(video_stream.quality_qn or 0)
+        if actual_qn <= 0 or actual_qn == task.quality.qn:
+            return
+        actual_label = video_stream.quality_label or f"QN {actual_qn}"
+        requested_label = task.quality.label
+        actual_quality = QualityOption(qn=actual_qn, label=actual_label)
+        with self._tasks_lock:
+            current = self._tasks.get(task_id)
+            if current is not None:
+                current.quality = actual_quality
+                self._save_tasks_locked()
+        task.quality = actual_quality
+        self.logger(f"画质已自动调整：{task.title} | {requested_label} -> {actual_label}")
 
     def _refresh_task_sessdata(self, task_id: str, task: DownloadTask, force: bool) -> str:
         if self.auth_refresher is None:
@@ -589,7 +679,6 @@ class DownloadManager:
                 current = self._tasks.get(task_id)
                 if current is not None:
                     current.sessdata = sessdata
-                    self._save_tasks_locked()
             task.sessdata = sessdata
         return sessdata
 
@@ -605,6 +694,7 @@ class DownloadManager:
     ) -> None:
         candidate_urls = [stream.url, *stream.backup_urls]
         attempt_errors: list[str] = []
+        headers = {"Referer": stream.referer} if stream.referer else None
 
         for index, candidate_url in enumerate(candidate_urls, start=1):
             try:
@@ -613,7 +703,9 @@ class DownloadManager:
                 if index > 1:
                     self.logger(f"任务 {task_id} 的 {stream.kind} 流切换到备用地址 #{index}")
 
-                with self.api.http_client.stream(candidate_url, sessdata=sessdata) as response:
+                with self.api.http_client.stream(candidate_url, sessdata=sessdata, extra_headers=headers) as response:
+                    self._reset_stream_progress(task_id, stream.kind)
+                    written = 0
                     with target_path.open("wb") as file_handle:
                         for chunk in response.iter_bytes(chunk_size=1024 * 128):
                             if self._stop_event.is_set():
@@ -623,19 +715,41 @@ class DownloadManager:
                                 return
                             if not chunk:
                                 continue
-                            self._rate_limiter.acquire(len(chunk))
+                            acquired = self._rate_limiter.acquire(
+                                len(chunk),
+                                cancel_events=(cancel_event, stop_event, self._stop_event),
+                            )
+                            if not acquired:
+                                return
                             if cancel_event.is_set() or stop_event.is_set():
                                 return
                             file_handle.write(chunk)
+                            written += len(chunk)
                             self._update_progress(task_id, stream.kind, len(chunk))
+                    if written == 0 or (stream.size_bytes > 0 and written != stream.size_bytes):
+                        raise RuntimeError("媒体流不完整，将尝试备用地址或稍后重试")
                 return
             except Exception as exc:
                 if cancel_event.is_set() or stop_event.is_set():
                     return
-                attempt_errors.append(f"{candidate_url}: {exc}")
+                safe_error = re.sub(r"https?://\S+", "<媒体地址>", str(exc))[:400]
+                attempt_errors.append(f"地址 #{index}: {safe_error or type(exc).__name__}")
 
         stop_event.set()
         errors.append(f"{stream.kind} 流下载失败：{' | '.join(attempt_errors)}")
+
+    def _reset_stream_progress(self, task_id: str, stream_kind: str) -> None:
+        with self._tasks_lock:
+            task = self._tasks[task_id]
+            progress = task.progress
+            if stream_kind == "video":
+                progress.video_downloaded_bytes = 0
+            else:
+                progress.audio_downloaded_bytes = 0
+            progress.downloaded_bytes = progress.video_downloaded_bytes + progress.audio_downloaded_bytes
+            progress.percent = progress.downloaded_bytes * 100 / progress.total_bytes if progress.total_bytes else 0.0
+            progress.speed_bps = 0.0
+            task._speed_samples.clear()
 
     def _set_status(self, task_id: str, status: TaskStatus, message: str) -> None:
         with self._tasks_lock:

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import base64
 import json
+import math
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Any
-from urllib.parse import parse_qsl, urlparse
+from typing import Any
+from urllib.parse import unquote_plus, urlparse
 
-from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
-
+from bili_client.services.cookies import normalize_cookie_value
+from bili_client.services.file_io import atomic_write_text
 from bili_client.services.http_client import HttpClient
+from bili_client.services.secure_store import protect_for_current_user, protection_available, unprotect_for_current_user
 
 
 class AuthError(RuntimeError):
@@ -39,7 +41,7 @@ class AuthSession:
         preferred_order = ("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid")
         pairs = [(name, self.cookies[name]) for name in preferred_order if self.cookies.get(name)]
         pairs.extend((name, value) for name, value in self.cookies.items() if name not in preferred_order and value)
-        return "; ".join(f"{name}={value}" for name, value in pairs)
+        return "; ".join(f"{name}={normalize_cookie_value(value)}" for name, value in pairs)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -50,16 +52,24 @@ class AuthSession:
         }
 
     @classmethod
-    def from_json(cls, payload: dict[str, Any]) -> "AuthSession":
+    def from_json(cls, payload: dict[str, Any]) -> AuthSession:
         cookies = payload.get("cookies") or {}
         if not isinstance(cookies, dict):
             cookies = {}
         return cls(
             cookies={str(key): str(value) for key, value in cookies.items() if value},
             refresh_token=str(payload.get("refresh_token", "")),
-            updated_at=float(payload.get("updated_at", 0) or 0),
-            last_checked_at=float(payload.get("last_checked_at", 0) or 0),
+            updated_at=cls._timestamp(payload.get("updated_at")),
+            last_checked_at=cls._timestamp(payload.get("last_checked_at")),
         )
+
+    @staticmethod
+    def _timestamp(value) -> float:
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return number if math.isfinite(number) and number >= 0 else 0.0
 
 
 @dataclass(slots=True)
@@ -102,23 +112,54 @@ JNrRuoEUXpabUzGB8QIDAQAB
         self.check_interval_seconds = max(0.0, check_interval_seconds)
         self._session: AuthSession | None = None
         self._lock = threading.RLock()
+        self._refresh_lock = threading.Lock()
 
     def load_session(self) -> AuthSession | None:
-        if self._session is not None:
+        with self._lock:
+            if self._session is not None:
+                return self._session
+            if not self.auth_file.exists():
+                return None
+            try:
+                stored = json.loads(self.auth_file.read_text(encoding="utf-8"))
+                session_payload, needs_migration = self._decode_stored_session(stored)
+                self._session = AuthSession.from_json(session_payload)
+                if needs_migration:
+                    self.save_session(self._session)
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+                self._session = None
             return self._session
-        if not self.auth_file.exists():
-            return None
-        try:
-            data = json.loads(self.auth_file.read_text(encoding="utf-8"))
-            self._session = AuthSession.from_json(data)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            self._session = None
-        return self._session
 
     def save_session(self, session: AuthSession) -> None:
-        self.auth_file.parent.mkdir(parents=True, exist_ok=True)
-        self.auth_file.write_text(json.dumps(session.to_json(), ensure_ascii=False, indent=2), encoding="utf-8")
-        self._session = session
+        with self._lock:
+            session_json = json.dumps(session.to_json(), ensure_ascii=False).encode("utf-8")
+            if protection_available():
+                protected = protect_for_current_user(session_json)
+                payload = {
+                    "version": 2,
+                    "protection": "dpapi-current-user",
+                    "protected": base64.b64encode(protected).decode("ascii"),
+                }
+            else:
+                payload = {"version": 2, "session": session.to_json()}
+            atomic_write_text(self.auth_file, json.dumps(payload, ensure_ascii=False, indent=2))
+            self._session = session
+
+    def _decode_stored_session(self, stored) -> tuple[dict[str, Any], bool]:
+        if not isinstance(stored, dict):
+            raise ValueError("登录状态文件格式无效")
+        protected = stored.get("protected")
+        if isinstance(protected, str) and protected:
+            decoded = base64.b64decode(protected, validate=True)
+            plaintext = unprotect_for_current_user(decoded)
+            payload = json.loads(plaintext.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("登录状态内容无效")
+            return payload, False
+        session_payload = stored.get("session")
+        if isinstance(session_payload, dict):
+            return session_payload, protection_available()
+        return stored, True
 
     def create_qr_login(self) -> QrLoginInfo:
         payload = self.http_client.get_json(self.QR_GENERATE_URL, retries=1)
@@ -155,7 +196,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
         return QrPollResult(code=0, message="登录成功", session=session)
 
     def ensure_latest_session(self, fallback_sessdata: str = "", force: bool = False) -> AuthSession | None:
-        with self._lock:
+        with self._refresh_lock:
             session = self.load_session()
             if session is None and fallback_sessdata.strip():
                 session = AuthSession(cookies={"SESSDATA": fallback_sessdata.strip()})
@@ -181,15 +222,36 @@ JNrRuoEUXpabUzGB8QIDAQAB
             data = info.get("data") or {}
             session.last_checked_at = now
             if not data.get("refresh"):
-                self.save_session(session)
-                return session
+                return self._save_if_current(session, session)
 
             if not session.refresh_token:
-                self.save_session(session)
+                current = self._save_if_current(session, session)
+                if current is not session:
+                    return current
                 raise AuthError("当前登录态缺少 refresh_token，请重新扫码登录")
 
             timestamp_ms = int(data.get("timestamp") or round(time.time() * 1000))
             return self._refresh_session(session, timestamp_ms)
+
+    def _save_if_current(self, original: AuthSession, updated: AuthSession) -> AuthSession:
+        with self._lock:
+            if self._session is not None and self._session is not original:
+                return self._session
+            self.save_session(updated)
+            return updated
+
+    def set_sessdata(self, sessdata: str) -> None:
+        with self._lock:
+            current = self.load_session()
+            token = sessdata.strip()
+            if current is not None and current.sessdata == token:
+                return
+            self.http_client.clear_cookies()
+            if token:
+                self.save_session(AuthSession(cookies={"SESSDATA": token}))
+            else:
+                self.auth_file.unlink(missing_ok=True)
+                self._session = None
 
     def _cookie_info(self, session: AuthSession) -> dict[str, Any]:
         params = {"csrf": session.csrf} if session.csrf else None
@@ -229,9 +291,8 @@ JNrRuoEUXpabUzGB8QIDAQAB
         )
 
         self._confirm_refresh(refreshed, old_refresh_token)
-        self.save_session(refreshed)
         self.logger("B 站登录态已自动刷新")
-        return refreshed
+        return self._save_if_current(session, refreshed)
 
     def _confirm_refresh(self, session: AuthSession, old_refresh_token: str) -> None:
         response = self.http_client.post(
@@ -257,9 +318,13 @@ JNrRuoEUXpabUzGB8QIDAQAB
         return match.group(1).strip()
 
     def _correspond_path(self, timestamp_ms: int) -> str:
+        from Crypto.Cipher import PKCS1_OAEP
+        from Crypto.Hash import SHA256
+        from Crypto.PublicKey import RSA
+
         public_key = RSA.import_key(self.PUBLIC_KEY)
         cipher = PKCS1_OAEP.new(public_key, hashAlgo=SHA256)
-        encrypted = cipher.encrypt(f"refresh_{timestamp_ms}".encode("utf-8"))
+        encrypted = cipher.encrypt(f"refresh_{timestamp_ms}".encode())
         return encrypted.hex()
 
     @staticmethod
@@ -270,6 +335,15 @@ JNrRuoEUXpabUzGB8QIDAQAB
     def _cookies_from_callback_url(url: str) -> dict[str, str]:
         if not url:
             return {}
-        query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
         names = ("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid")
-        return {name: query[name] for name in names if query.get(name)}
+        cookies: dict[str, str] = {}
+        for part in urlparse(url).query.split("&"):
+            if not part:
+                continue
+            raw_name, separator, raw_value = part.partition("=")
+            if not separator:
+                continue
+            name = unquote_plus(raw_name)
+            if name in names and raw_value:
+                cookies[name] = normalize_cookie_value(raw_value)
+        return cookies

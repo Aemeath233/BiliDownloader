@@ -4,7 +4,6 @@ import shutil
 import zipfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_DIR = ROOT / "vendor" / "ffmpeg"
 BIN_DIR = VENDOR_DIR / "bin"
@@ -19,6 +18,8 @@ def find_zip() -> Path:
 
 def main() -> None:
     archive_path = find_zip()
+    if not VENDOR_DIR.resolve().is_relative_to(ROOT.resolve()):
+        raise ValueError("FFmpeg 目录必须位于当前项目内，拒绝操作外部目录。")
     if VENDOR_DIR.exists():
         shutil.rmtree(VENDOR_DIR)
     BIN_DIR.mkdir(parents=True, exist_ok=True)

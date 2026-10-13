@@ -1,4 +1,4 @@
-﻿from bili_client.core.models import (
+from bili_client.core.models import (
     AppConfig,
     DownloadTask,
     EpisodeInfo,

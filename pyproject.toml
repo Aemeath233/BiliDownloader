@@ -1,0 +1,31 @@
+[project]
+name = "bili-downloader"
+version = "1.1.0"
+description = "Windows Bilibili downloader with a responsive desktop interface"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dynamic = ["dependencies"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["bili_client*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["build", "dist", "vendor", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"main.py" = ["E402"]
+"scripts/verify_portable.py" = ["E402"]

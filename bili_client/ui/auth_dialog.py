@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import customtkinter as ctk
 import qrcode
@@ -10,6 +10,7 @@ from PIL import Image
 from bili_client.services.auth_service import AuthError, AuthService, AuthSession, QrPollResult
 from bili_client.ui.async_tasks import UiTaskRunner
 from bili_client.ui.styles import CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS
+from bili_client.ui.widgets import MotionButton, TextLabel
 
 
 class QrLoginDialog(ctk.CTkToplevel):
@@ -45,14 +46,14 @@ class QrLoginDialog(ctk.CTkToplevel):
         container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         container.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(
+        TextLabel(
             container,
             text="Bilibili 扫码登录",
             text_color=PALETTE["text"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=22, weight="bold"),
         ).grid(row=0, column=0, sticky="ew", padx=18, pady=(20, 4))
 
-        ctk.CTkLabel(
+        TextLabel(
             container,
             text="用哔哩哔哩手机端扫码，确认后会自动保存登录态",
             text_color=PALETTE["muted"],
@@ -62,7 +63,7 @@ class QrLoginDialog(ctk.CTkToplevel):
         qr_holder = ctk.CTkFrame(container, fg_color=PALETTE["surface"], corner_radius=CARD_RADIUS)
         qr_holder.grid(row=2, column=0, padx=34, pady=(0, 18))
 
-        self.qr_label = ctk.CTkLabel(
+        self.qr_label = TextLabel(
             qr_holder,
             text="正在生成二维码...",
             width=260,
@@ -72,7 +73,7 @@ class QrLoginDialog(ctk.CTkToplevel):
         )
         self.qr_label.grid(row=0, column=0, padx=12, pady=12)
 
-        self.status_label = ctk.CTkLabel(
+        self.status_label = TextLabel(
             container,
             text="正在连接 Bilibili 登录接口",
             text_color=PALETTE["accent"],
@@ -80,14 +81,14 @@ class QrLoginDialog(ctk.CTkToplevel):
         )
         self.status_label.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 10))
 
-        ctk.CTkLabel(
+        TextLabel(
             container,
             text="如果二维码过期，关闭窗口后重新点击扫码登录即可",
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 18))
 
-        ctk.CTkButton(
+        MotionButton(
             container,
             text="取消",
             command=self._close,
@@ -121,11 +122,17 @@ class QrLoginDialog(ctk.CTkToplevel):
                 time.sleep(self.POLL_INTERVAL_SECONDS)
 
             if not self._closed:
-                self._post_ui(lambda: self.status_label.configure(text="二维码已过期，请重新打开扫码窗口", text_color=PALETTE["warning"]))
+                self._post_ui(
+                    lambda: self.status_label.configure(
+                        text="二维码已过期，请重新打开扫码窗口", text_color=PALETTE["warning"]
+                    )
+                )
         except AuthError as exc:
             self._post_ui(lambda error=exc: self.status_label.configure(text=str(error), text_color=PALETTE["error"]))
         except Exception as exc:
-            self._post_ui(lambda error=exc: self.status_label.configure(text=f"登录失败：{error}", text_color=PALETTE["error"]))
+            self._post_ui(
+                lambda error=exc: self.status_label.configure(text=f"登录失败：{error}", text_color=PALETTE["error"])
+            )
 
     def _show_qr(self, login_url: str) -> None:
         image = self._make_qr_image(login_url)
@@ -156,10 +163,7 @@ class QrLoginDialog(ctk.CTkToplevel):
     def _post_ui(self, callback: Callable[[], None]) -> None:
         if self._closed:
             return
-        try:
-            self.after(0, callback)
-        except RuntimeError:
-            self._closed = True
+        self.ui_tasks.post(lambda: None if self._closed else callback())
 
     def _close(self) -> None:
         self._closed = True

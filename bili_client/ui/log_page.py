@@ -7,7 +7,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from bili_client.ui.styles import BUTTON_HEIGHT, CARD_RADIUS, FONT_FAMILY, PALETTE, PANEL_RADIUS, button_style
-
+from bili_client.ui.widgets import MotionButton, TextEntry, TextLabel, notify
 
 LOG_FILTERS = {
     "全部": "all",
@@ -18,8 +18,10 @@ LOG_FILTERS = {
 
 
 class LogPage(ctk.CTkFrame):
+    MAX_MESSAGES = 5000
+
     def __init__(self, master, log_file_path: Path, log_dir_path: Path, on_show_failed_tasks=None) -> None:
-        super().__init__(master, fg_color="transparent")
+        super().__init__(master, fg_color=PALETTE["app_bg"])
         self.auto_scroll_var = ctk.BooleanVar(value=True)
         self.filter_var = ctk.StringVar(value="")
         self.log_file_path = log_file_path
@@ -27,6 +29,9 @@ class LogPage(ctk.CTkFrame):
         self.on_show_failed_tasks = on_show_failed_tasks
         self.all_messages: list[str] = []
         self._has_recent_error = False
+        self._active = False
+        self._dirty = False
+        self._filter_after_id = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -42,13 +47,13 @@ class LogPage(ctk.CTkFrame):
 
         copy = ctk.CTkFrame(header, fg_color="transparent")
         copy.grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
+        TextLabel(
             copy,
             text="日志输出",
             text_color=PALETTE["text"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
         ).pack(anchor="w")
-        ctk.CTkLabel(
+        TextLabel(
             copy,
             text=f"文件：{self.log_file_path}",
             text_color=PALETTE["muted"],
@@ -56,7 +61,7 @@ class LogPage(ctk.CTkFrame):
         ).pack(anchor="w", pady=(3, 0))
 
         action_row = ctk.CTkFrame(header, fg_color="transparent")
-        action_row.grid(row=0, column=1, sticky="e")
+        action_row.grid(row=1, column=0, sticky="w", pady=(12, 0))
 
         ctk.CTkCheckBox(
             action_row,
@@ -69,7 +74,7 @@ class LogPage(ctk.CTkFrame):
             text_color=PALETTE["text"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=0, column=0, padx=(0, 10))
-        ctk.CTkButton(
+        MotionButton(
             action_row,
             text="复制日志",
             command=self.copy_visible_logs,
@@ -78,7 +83,7 @@ class LogPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             **button_style("secondary"),
         ).grid(row=0, column=1, padx=(0, 8))
-        ctk.CTkButton(
+        MotionButton(
             action_row,
             text="打开文件",
             command=self.open_log_file,
@@ -87,7 +92,7 @@ class LogPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             **button_style("secondary"),
         ).grid(row=0, column=2, padx=(0, 8))
-        ctk.CTkButton(
+        MotionButton(
             action_row,
             text="打开目录",
             command=self.open_log_dir,
@@ -96,7 +101,7 @@ class LogPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             **button_style("secondary"),
         ).grid(row=0, column=3, padx=(0, 8))
-        ctk.CTkButton(
+        MotionButton(
             action_row,
             text="清空界面",
             command=self.clear_logs,
@@ -126,7 +131,7 @@ class LogPage(ctk.CTkFrame):
         self.filter_segment.grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.filter_segment.set("全部")
 
-        self.filter_entry = ctk.CTkEntry(
+        self.filter_entry = TextEntry(
             filter_row,
             textvariable=self.filter_var,
             placeholder_text="筛选任务标题、错误关键词或 URL",
@@ -137,10 +142,10 @@ class LogPage(ctk.CTkFrame):
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         )
         self.filter_entry.grid(row=0, column=1, sticky="ew", padx=(0, 10))
-        self.filter_entry.bind("<KeyRelease>", lambda _event: self._render_visible_logs())
-        self.filter_entry.bind("<<Paste>>", lambda _event: self.after(50, self._render_visible_logs))
+        self.filter_entry.bind("<KeyRelease>", self._schedule_filter)
+        self.filter_entry.bind("<<Paste>>", self._schedule_filter)
 
-        self.failed_tasks_button = ctk.CTkButton(
+        self.failed_tasks_button = MotionButton(
             filter_row,
             text="查看失败任务",
             command=self._show_failed_tasks,
@@ -169,19 +174,57 @@ class LogPage(ctk.CTkFrame):
             return
 
         self.all_messages.extend(messages)
-        if any(self._is_error_message(message) for message in messages):
+        overflow = max(0, len(self.all_messages) - self.MAX_MESSAGES)
+        if overflow:
+            del self.all_messages[:overflow]
+        if not self._has_recent_error and any(self._is_error_message(message) for message in messages):
             self._has_recent_error = True
             self.failed_tasks_button.configure(state="normal")
-        self._render_visible_logs(keep_position=True)
+        if not self._active:
+            self._dirty = True
+            return
+        if overflow:
+            self._render_visible_logs(keep_position=True)
+        else:
+            self._append_log_lines([message for message in messages if self._passes_filter(message)])
+
+    def set_active(self, active: bool) -> None:
+        self._active = active
+        if active and self._dirty:
+            self._render_visible_logs(keep_position=True)
+
+    def _schedule_filter(self, _event=None) -> None:
+        if self._filter_after_id is not None:
+            self.after_cancel(self._filter_after_id)
+        self._filter_after_id = self.after(180, self._apply_filter)
+
+    def _apply_filter(self) -> None:
+        self._filter_after_id = None
+        self._render_visible_logs()
+
+    def _append_log_lines(self, messages: list[str]) -> None:
+        if not messages:
+            return
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", "".join(message + "\n" for message in messages))
+        if self.auto_scroll_var.get():
+            self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
     def _render_visible_logs(self, keep_position: bool = False) -> None:
+        if not self._active:
+            self._dirty = True
+            return
+        self._dirty = False
+        position = self.log_text.yview()[0] if keep_position else 0
         visible_messages = [message for message in self.all_messages if self._passes_filter(message)]
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
-        for message in visible_messages:
-            self.log_text.insert("end", message + "\n")
+        self.log_text.insert("end", "".join(message + "\n" for message in visible_messages))
         if self.auto_scroll_var.get():
             self.log_text.see("end")
+        elif keep_position:
+            self.log_text.yview("moveto", position)
         self.log_text.configure(state="disabled")
 
     def _passes_filter(self, message: str) -> bool:
@@ -208,10 +251,12 @@ class LogPage(ctk.CTkFrame):
         content = "\n".join(message for message in self.all_messages if self._passes_filter(message))
         self.clipboard_clear()
         self.clipboard_append(content)
+        notify(self, "当前筛选的日志已复制")
 
     def clear_logs(self) -> None:
         self.all_messages.clear()
         self._has_recent_error = False
+        self._dirty = False
         self.failed_tasks_button.configure(state="disabled")
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")

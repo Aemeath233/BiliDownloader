@@ -1,63 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
-
-
-datas = [('logo.ico', '.')]
-binaries = []
-hiddenimports = []
-
-ffmpeg_bin = Path('vendor') / 'ffmpeg' / 'bin'
-if ffmpeg_bin.exists():
-    for ffmpeg_file in ffmpeg_bin.iterdir():
-        if ffmpeg_file.suffix.lower() in {'.exe', '.dll'}:
-            binaries.append((str(ffmpeg_file), 'ffmpeg'))
-
-ffmpeg_license = Path('vendor') / 'ffmpeg' / 'LICENSE.txt'
-if ffmpeg_license.exists():
-    datas.append((str(ffmpeg_license), 'ffmpeg'))
-
-for package_name in ('customtkinter', 'httpx', 'darkdetect'):
-    collected = collect_all(package_name)
-    datas += collected[0]
-    binaries += collected[1]
-    hiddenimports += collected[2]
-
+root = Path(SPECPATH)
+sys.path.insert(0, str(root / 'scripts'))
+from build_support import app_data, deduplicate_ffmpeg
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
+    [str(root / 'main.py')], pathex=[str(root)], binaries=[],
+    datas=app_data(root, require_ffmpeg=False), hiddenimports=[],
+    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[],
+    noarchive=False, optimize=0,
 )
+a.binaries = deduplicate_ffmpeg(a.binaries, root)
 pyz = PYZ(a.pure)
 
 exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='BiliDownloader',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=['logo.ico'],
+    pyz, a.scripts, [], exclude_binaries=True,
+    name='BiliDownloader', debug=False,
+    bootloader_ignore_signals=False, strip=False, upx=False, console=False,
+    disable_windowed_traceback=False, argv_emulation=False, target_arch=None,
+    codesign_identity=None, entitlements_file=None, icon=[str(root / 'logo.ico')],
 )
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
+               upx_exclude=[], name='BiliDownloader')

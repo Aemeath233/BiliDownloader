@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
-
 ctk.set_default_color_theme("blue")
 
 
@@ -11,6 +10,7 @@ def dual(light: str, dark: str) -> tuple[str, str]:
 
 
 FONT_FAMILY = "Microsoft YaHei UI"
+ctk.ThemeManager.theme["CTkFont"]["family"] = FONT_FAMILY
 CARD_RADIUS = 10
 PANEL_RADIUS = 14
 BUTTON_HEIGHT = 36
@@ -26,6 +26,7 @@ PALETTE = {
     "sidebar_heading": dual("#0f172a", "#f8fafc"),
     "primary": dual("#fb7299", "#fb7299"),
     "primary_hover": dual("#e85f88", "#ff85aa"),
+    "primary_soft": dual("#fff0f5", "#382031"),
     "accent": dual("#00a1d6", "#3bc7f3"),
     "accent_soft": dual("#e5f7fd", "#0b3344"),
     "muted": dual("#64748b", "#9aa7b8"),

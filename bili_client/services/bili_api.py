@@ -1,12 +1,17 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import re
-from typing import Callable
+import threading
+import time
+from collections.abc import Callable
 
 import httpx
 
 from bili_client.core.models import EpisodeInfo, MediaParseResult, QualityOption, StreamInfo, safe_filename
+from bili_client.core.security import SHARE_HOSTS, normalize_media_url, normalize_share_url
 from bili_client.services.http_client import HttpClient
 
 
@@ -17,22 +22,40 @@ class BiliApiError(RuntimeError):
 class BilibiliApi:
     URL_PATTERN = re.compile(r"https?://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]+")
     REQUEST_RETRIES = 2
-    RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+    RETRY_STATUS_CODES = {412, 429, 500, 502, 503, 504}
+    METADATA_CACHE_SECONDS = 300
+    PLAYURL_CACHE_SECONDS = 45
+    RESOLVE_CACHE_SECONDS = 300
+    MAX_CACHE_ENTRIES = 512
 
     def __init__(self, http_client: HttpClient, logger: Callable[[str], None] | None = None) -> None:
         self.http_client = http_client
         self.logger = logger or (lambda _message: None)
+        self._cache_lock = threading.RLock()
+        self._json_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
+        self._resolved_url_cache: dict[tuple[str, str], tuple[float, str]] = {}
 
     def extract_url(self, text: str) -> str | None:
         if not text:
             return None
         match = self.URL_PATTERN.search(text.strip())
-        return match.group(0) if match else None
+        if match:
+            return match.group(0).rstrip(".,;!)]}")
+        identifier = re.search(r"(?<![A-Za-z0-9])(?:BV[0-9A-Za-z]{10}|ep\d+|ss\d+)(?![A-Za-z0-9])", text)
+        if identifier:
+            value = identifier.group(0)
+            route = "video" if value.startswith("BV") else "bangumi/play"
+            return f"https://www.bilibili.com/{route}/{value}"
+        return None
 
     def parse_media(self, text: str, sessdata: str = "") -> MediaParseResult:
         share_url = self.extract_url(text)
         if not share_url:
             raise BiliApiError("未识别到可用的 B 站链接")
+        try:
+            share_url = normalize_share_url(share_url)
+        except ValueError as exc:
+            raise BiliApiError(str(exc)) from exc
 
         normalized_url = self._resolve_url(share_url, sessdata)
 
@@ -56,7 +79,12 @@ class BilibiliApi:
                 ep_id = None
                 api_url = f"https://api.bilibili.com/pgc/view/web/season?season_id={ss_match.group(1)}"
 
-            data = self._load_json(api_url, sessdata)
+            data = self._load_json(
+                api_url,
+                sessdata,
+                referer=normalized_url,
+                cache_seconds=self.METADATA_CACHE_SECONDS,
+            )
             result = data["result"]
             title = result.get("season_title", title)
             folder_title = title
@@ -80,7 +108,12 @@ class BilibiliApi:
         elif bv_match:
             bvid = bv_match.group(0)
             api_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
-            data = self._load_json(api_url, sessdata)
+            data = self._load_json(
+                api_url,
+                sessdata,
+                referer=normalized_url,
+                cache_seconds=self.METADATA_CACHE_SECONDS,
+            )
             result = data["data"]
             title = result.get("title", title)
             owner = result.get("owner") or {}
@@ -126,10 +159,13 @@ class BilibiliApi:
     def get_quality_options(self, episode: EpisodeInfo, sessdata: str = "") -> list[QualityOption]:
         data = self._playurl(episode, 116, sessdata)
         play_data = data.get("result", data.get("data", {}))
+        self._raise_if_preview_only(play_data)
         descriptions = play_data.get("accept_description", [])
         qualities = play_data.get("accept_quality", [])
 
-        options = [QualityOption(qn=int(qn), label=str(label)) for label, qn in zip(descriptions, qualities)]
+        options = [
+            QualityOption(qn=int(qn), label=str(label)) for label, qn in zip(descriptions, qualities, strict=False)
+        ]
         if not options:
             raise BiliApiError("未读取到可用的画质选项")
         return options
@@ -137,24 +173,41 @@ class BilibiliApi:
     def get_streams(self, episode: EpisodeInfo, qn: int, sessdata: str = "") -> tuple[StreamInfo, StreamInfo | None]:
         data = self._playurl(episode, qn, sessdata)
         play_data = data.get("result", data.get("data", {}))
+        self._raise_if_preview_only(play_data)
         dash = play_data.get("dash")
+        referer = self._episode_referer(episode)
         if not dash:
-            raise BiliApiError("未获取到 DASH 流地址，可能受版权限制或需要更高权限")
+            return self._streams_from_durl(play_data, sessdata, referer)
 
         video_candidates = dash.get("video", [])
         audio_candidates = dash.get("audio", [])
         if not video_candidates:
             raise BiliApiError("视频流为空")
 
-        selected_video = next((item for item in video_candidates if int(item.get("id", 0)) == int(qn)), video_candidates[0])
+        selected_video = next(
+            (item for item in video_candidates if int(item.get("id", 0)) == int(qn)), video_candidates[0]
+        )
+        actual_qn = int(selected_video.get("id", 0) or 0)
+        quality_labels = {
+            int(quality): str(description)
+            for description, quality in zip(
+                play_data.get("accept_description", []),
+                play_data.get("accept_quality", []),
+                strict=False,
+            )
+        }
+        actual_label = quality_labels.get(actual_qn, f"QN {actual_qn}" if actual_qn else "实际画质")
         video_urls = self._pick_stream_urls(selected_video)
         video_url = video_urls[0]
-        video_size = self._probe_size(video_url, sessdata)
+        video_size = self._probe_size(video_url, sessdata, referer=referer)
         video_stream = StreamInfo(
             kind="video",
             url=video_url,
             size_bytes=video_size,
             backup_urls=video_urls[1:],
+            referer=referer,
+            quality_qn=actual_qn,
+            quality_label=actual_label,
         )
 
         audio_stream = None
@@ -162,36 +215,117 @@ class BilibiliApi:
             selected_audio = audio_candidates[0]
             audio_urls = self._pick_stream_urls(selected_audio)
             audio_url = audio_urls[0]
-            audio_size = self._probe_size(audio_url, sessdata)
+            audio_size = self._probe_size(audio_url, sessdata, referer=referer)
             audio_stream = StreamInfo(
                 kind="audio",
                 url=audio_url,
                 size_bytes=audio_size,
                 backup_urls=audio_urls[1:],
+                referer=referer,
             )
 
         return video_stream, audio_stream
 
+    def _streams_from_durl(
+        self,
+        play_data: dict,
+        sessdata: str,
+        referer: str,
+    ) -> tuple[StreamInfo, StreamInfo | None]:
+        durl_items = play_data.get("durl") or play_data.get("durls") or []
+        if not durl_items:
+            raise BiliApiError("未获取到音视频流地址，可能受版权限制或需要更高权限")
+        self._raise_if_preview_only(play_data)
+
+        if len(durl_items) > 1:
+            raise BiliApiError("当前视频返回了分段 MP4 流，暂不支持自动合并这些分段")
+
+        item = durl_items[0]
+        url = str(item.get("url") or "")
+        if not url:
+            raise BiliApiError("MP4 流地址为空")
+
+        backups = item.get("backup_url") or item.get("backupUrl") or []
+        urls = list(
+            dict.fromkeys(normalize_media_url(value) for value in [url, *(str(backup) for backup in backups if backup)])
+        )
+        try:
+            size_bytes = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            size_bytes = 0
+        if size_bytes <= 0:
+            size_bytes = self._probe_size(urls[0], sessdata, referer=referer)
+
+        actual_qn = int(play_data.get("quality") or 0)
+        quality_labels = {
+            int(quality): str(description)
+            for description, quality in zip(
+                play_data.get("accept_description", []),
+                play_data.get("accept_quality", []),
+                strict=False,
+            )
+        }
+        actual_label = quality_labels.get(actual_qn, str(play_data.get("format") or "MP4").upper())
+
+        return (
+            StreamInfo(
+                kind="video",
+                url=urls[0],
+                size_bytes=size_bytes,
+                backup_urls=urls[1:],
+                referer=referer,
+                quality_qn=actual_qn,
+                quality_label=actual_label,
+            ),
+            None,
+        )
+
+    def _raise_if_preview_only(self, play_data: dict) -> None:
+        try:
+            error_code = int(play_data.get("error_code") or 0)
+        except (TypeError, ValueError):
+            error_code = 0
+        if play_data.get("is_preview") or error_code == -10403:
+            raise BiliApiError("当前账号只能获取预览片段，完整内容可能需要会员、购片或版权权限")
+
     def _resolve_url(self, url: str, sessdata: str) -> str:
+        cache_key = (self._auth_cache_scope(sessdata), url)
+        cached_url = self._get_resolved_url_cache(cache_key)
+        if cached_url:
+            return cached_url
+
         try:
             response = self.http_client.head(
                 url,
                 sessdata=sessdata,
                 retries=1,
                 retry_status_codes=self.RETRY_STATUS_CODES,
+                allowed_hosts=SHARE_HOSTS,
             )
-            return str(response.url)
-        except httpx.HTTPError as exc:
+            resolved_url = self._validated_redirect(response.url)
+            self._set_resolved_url_cache(cache_key, resolved_url, self.RESOLVE_CACHE_SECONDS)
+            return resolved_url
+        except httpx.HTTPError:
             try:
                 response = self.http_client.get(
                     url,
                     sessdata=sessdata,
                     retries=1,
                     retry_status_codes=self.RETRY_STATUS_CODES,
+                    allowed_hosts=SHARE_HOSTS,
                 )
-                return str(response.url)
-            except httpx.HTTPError:
-                raise BiliApiError(f"链接解析失败: {exc}") from exc
+                resolved_url = self._validated_redirect(response.url)
+                self._set_resolved_url_cache(cache_key, resolved_url, self.RESOLVE_CACHE_SECONDS)
+                return resolved_url
+            except httpx.HTTPError as get_error:
+                raise BiliApiError(f"链接解析失败: {get_error}") from get_error
+
+    @staticmethod
+    def _validated_redirect(url) -> str:
+        try:
+            return normalize_share_url(str(url))
+        except ValueError as exc:
+            raise BiliApiError("链接跳转到了不支持的站点，已停止解析") from exc
 
     def _playurl(self, episode: EpisodeInfo, qn: int, sessdata: str) -> dict:
         if episode.is_bangumi:
@@ -204,13 +338,25 @@ class BilibiliApi:
                 "https://api.bilibili.com/x/player/playurl"
                 f"?bvid={episode.bvid}&cid={episode.cid}&qn={qn}&fnver=0&fnval=4048&fourk=1"
             )
-        return self._load_json(api_url, sessdata)
+        return self._load_json(
+            api_url,
+            sessdata,
+            referer=self._episode_referer(episode),
+            cache_seconds=self.PLAYURL_CACHE_SECONDS,
+        )
 
-    def _load_json(self, url: str, sessdata: str) -> dict:
+    def _load_json(self, url: str, sessdata: str, referer: str = "", cache_seconds: int = 0) -> dict:
+        cache_key = (self._auth_cache_scope(sessdata), referer, url)
+        if cache_seconds > 0:
+            cached = self._get_json_cache(cache_key)
+            if cached is not None:
+                return cached
+
         try:
             data = self.http_client.get_json(
                 url,
                 sessdata=sessdata,
+                extra_headers=self._web_headers(referer),
                 retries=self.REQUEST_RETRIES,
                 retry_status_codes=self.RETRY_STATUS_CODES,
             )
@@ -224,6 +370,8 @@ class BilibiliApi:
         if data.get("code") != 0:
             message = data.get("message") or data.get("msg") or "未知错误"
             raise BiliApiError(message)
+        if cache_seconds > 0:
+            self._set_json_cache(cache_key, data, cache_seconds)
         return data
 
     def _pick_stream_urls(self, payload: dict) -> list[str]:
@@ -234,16 +382,18 @@ class BilibiliApi:
 
         backups = payload.get("backupUrl") or payload.get("backup_url") or []
         urls.extend(str(item) for item in backups if item)
-        deduped_urls = list(dict.fromkeys(urls))
+        deduped_urls = list(dict.fromkeys(normalize_media_url(url) for url in urls))
         if deduped_urls:
             return deduped_urls
         raise BiliApiError("流媒体地址为空")
 
-    def _probe_size(self, url: str, sessdata: str) -> int:
+    def _probe_size(self, url: str, sessdata: str, referer: str = "") -> int:
+        headers = self._web_headers(referer)
         try:
             response = self.http_client.head(
                 url,
                 sessdata=sessdata,
+                extra_headers=headers,
                 retries=1,
                 retry_status_codes=self.RETRY_STATUS_CODES,
             )
@@ -254,18 +404,68 @@ class BilibiliApi:
             pass
 
         try:
-            response = self.http_client.get(
+            with self.http_client.stream(
                 url,
                 sessdata=sessdata,
-                extra_headers={"Range": "bytes=0-0"},
-                retries=1,
-                retry_status_codes=self.RETRY_STATUS_CODES,
-            )
-            content_range = response.headers.get("content-range", "")
-            match = re.search(r"/(\d+)$", content_range)
-            if match:
-                return int(match.group(1))
+                extra_headers={**headers, "Range": "bytes=0-0"},
+            ) as response:
+                content_range = response.headers.get("content-range", "")
+                match = re.search(r"/(\d+)$", content_range)
+                if match:
+                    return int(match.group(1))
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    return int(content_length)
         except (ValueError, httpx.HTTPError):
             pass
 
         return 0
+
+    def _episode_referer(self, episode: EpisodeInfo) -> str:
+        if episode.bvid:
+            return f"https://www.bilibili.com/video/{episode.bvid}"
+        return "https://www.bilibili.com/"
+
+    def _web_headers(self, referer: str = "") -> dict[str, str]:
+        return {"Referer": referer.strip() or "https://www.bilibili.com/"}
+
+    def _auth_cache_scope(self, sessdata: str) -> str:
+        token = sessdata.strip()
+        if not token:
+            return "guest"
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+        return f"auth:{digest}"
+
+    def _get_json_cache(self, key: tuple[str, str, str]) -> dict | None:
+        with self._cache_lock:
+            item = self._json_cache.get(key)
+            if item is None:
+                return None
+            expires_at, payload = item
+            if expires_at <= time.monotonic():
+                self._json_cache.pop(key, None)
+                return None
+            return copy.deepcopy(payload)
+
+    def _set_json_cache(self, key: tuple[str, str, str], payload: dict, ttl_seconds: int) -> None:
+        with self._cache_lock:
+            self._json_cache[key] = (time.monotonic() + ttl_seconds, copy.deepcopy(payload))
+            while len(self._json_cache) > self.MAX_CACHE_ENTRIES:
+                self._json_cache.pop(next(iter(self._json_cache)))
+
+    def _get_resolved_url_cache(self, key: tuple[str, str]) -> str | None:
+        with self._cache_lock:
+            item = self._resolved_url_cache.get(key)
+            if item is None:
+                return None
+            expires_at, resolved_url = item
+            if expires_at <= time.monotonic():
+                self._resolved_url_cache.pop(key, None)
+                return None
+            return resolved_url
+
+    def _set_resolved_url_cache(self, key: tuple[str, str], resolved_url: str, ttl_seconds: int) -> None:
+        with self._cache_lock:
+            self._resolved_url_cache[key] = (time.monotonic() + ttl_seconds, resolved_url)
+            while len(self._resolved_url_cache) > self.MAX_CACHE_ENTRIES:
+                self._resolved_url_cache.pop(next(iter(self._resolved_url_cache)))

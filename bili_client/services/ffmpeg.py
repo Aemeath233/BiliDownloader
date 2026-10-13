@@ -1,11 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import threading
-import time
+import uuid
 from pathlib import Path
 
 
@@ -17,7 +16,9 @@ class FFmpegService:
         self.ffmpeg_path = self.resolve_command(ffmpeg_path)
 
     def is_available(self) -> bool:
-        return bool(shutil.which(self.ffmpeg_path) or Path(self.ffmpeg_path).exists())
+        if Path(self.ffmpeg_path).is_absolute() or Path(self.ffmpeg_path).parent != Path("."):
+            return Path(self.ffmpeg_path).is_file()
+        return self._find_on_path(self.ffmpeg_path) is not None
 
     @classmethod
     def resolve_command(cls, ffmpeg_path: str = "ffmpeg") -> str:
@@ -25,11 +26,25 @@ class FFmpegService:
         if candidate.lower() not in {"ffmpeg", "ffmpeg.exe"}:
             return candidate
 
-        for bundled_path in cls._bundled_candidates():
-            if bundled_path.exists():
-                return str(bundled_path)
+        if getattr(sys, "frozen", False):
+            for bundled_path in cls._bundled_candidates():
+                if bundled_path.is_file():
+                    return str(bundled_path)
 
-        return shutil.which(candidate) or candidate
+        return cls._find_on_path(candidate) or candidate
+
+    @staticmethod
+    def _find_on_path(command: str) -> str | None:
+        names = (command,) if Path(command).suffix or os.name != "nt" else (command + ".exe",)
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            directory = Path(entry.strip('"'))
+            if not entry or not directory.is_absolute():
+                continue
+            for name in names:
+                executable = directory / name
+                if executable.is_file() and (os.name == "nt" or os.access(executable, os.X_OK)):
+                    return str(executable)
+        return None
 
     @staticmethod
     def _bundled_candidates() -> list[Path]:
@@ -48,8 +63,6 @@ class FFmpegService:
                 ]
             )
 
-        project_root = Path(__file__).resolve().parents[2]
-        candidates.append(project_root / "vendor" / "ffmpeg" / "bin" / "ffmpeg.exe")
         return candidates
 
     def merge(
@@ -59,34 +72,47 @@ class FFmpegService:
         output_path: Path,
         cancel_event: threading.Event | None = None,
     ) -> None:
-        command = [self.ffmpeg_path, "-i", str(video_path)]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_output = output_path.with_name(
+            f".{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix or '.mp4'}"
+        )
+        command = [self.ffmpeg_path, "-nostdin", "-i", str(video_path)]
         if audio_path is not None:
             command += ["-i", str(audio_path)]
-        command += ["-c", "copy", "-y", "-loglevel", "error", str(output_path)]
+        command += ["-c", "copy", "-y", "-loglevel", "error", str(temporary_output)]
 
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            **self._hidden_process_options(),
-        )
-        while process.poll() is None:
-            if cancel_event is not None and cancel_event.is_set():
-                process.terminate()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                **self._hidden_process_options(),
+            )
+            stderr = ""
+            while True:
                 try:
-                    process.wait(timeout=2)
+                    _stdout, stderr = process.communicate(timeout=0.1)
+                    break
                 except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise RuntimeError("已取消")
-            time.sleep(0.1)
+                    if cancel_event is not None and cancel_event.is_set():
+                        process.terminate()
+                        try:
+                            _stdout, stderr = process.communicate(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            _stdout, stderr = process.communicate()
+                        raise RuntimeError("已取消") from None
 
-        stdout, stderr = process.communicate()
-        result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            raise RuntimeError(stderr or "FFmpeg 合并失败")
+            if process.returncode != 0:
+                raise RuntimeError((stderr or "").strip() or "FFmpeg 合并失败")
+            os.replace(temporary_output, output_path)
+        except Exception:
+            try:
+                temporary_output.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def _hidden_process_options() -> dict:

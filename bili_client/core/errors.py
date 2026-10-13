@@ -14,6 +14,14 @@ def humanize_error(message: str) -> str:
     if not text:
         return "操作失败，但没有拿到具体原因。可以稍后重试一次。"
 
+    if _contains_any(
+        lowered, ("certificate_verify_failed", "certificate verify failed", "unable to get local issuer certificate")
+    ):
+        return "HTTPS 证书校验失败，请检查系统时间和受信任证书；如使用代理或抓包软件，请确认其证书已正确安装。"
+
+    if "预览" in text:
+        return "当前账号只能获取预览片段，完整内容可能需要会员、购片或版权权限。"
+
     if _contains_any(lowered, ("sessdata", "cookie", "login required")) or _contains_any(
         text, ("未登录", "登录", "-101", "账号")
     ):

@@ -67,14 +67,17 @@ class SingleInstance:
     def _serve(self) -> None:
         while self._running.is_set():
             try:
-                assert self._socket is not None
-                connection, _address = self._socket.accept()
-            except socket.timeout:
+                listener = self._socket
+                if listener is None:
+                    break
+                connection, _address = listener.accept()
+            except TimeoutError:
                 continue
             except OSError:
                 break
 
             with connection:
+                connection.settimeout(0.5)
                 try:
                     message = connection.recv(64)
                     if message == self.MESSAGE:

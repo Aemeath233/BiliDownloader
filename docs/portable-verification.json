@@ -1,0 +1,10 @@
+{
+  "size_mib": 103.84,
+  "window_seconds": 2.404,
+  "ready_seconds": 2.813,
+  "startup_log": "[2026-10-13 19:29:01] 启动耗时：窗口首帧 0.48s，下载页就绪 0.92s",
+  "ffmpeg_version": "ffmpeg version N-124223-gf044c5e627-20260428 Copyright (c) 2000-2026 the FFmpeg developers",
+  "bundled_media_merge": "passed",
+  "exe_only_directory": true,
+  "runtime_cleaned_after_exit": true
+}

@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
 
 # Local environments
 .venv/
@@ -13,10 +17,23 @@ dist/
 
 # Local IDE/project state
 .idea/
+.vscode/
 
 # Runtime/local secrets
 sessdata.txt
 *.log
+.env
+.env.*
+auth.json
+config.json
+tasks.json
+video/
+.bili_client/
+*.mp4
+*.m4s
+*.m4a
+*.part
+*.tmp
 
 # Bundled third-party binaries and downloaded archives
 vendor/ffmpeg/

@@ -24,6 +24,8 @@ class ConfigStoreTests(unittest.TestCase):
 
                 config = store.load()
                 saved = json.loads(store.config_file.read_text(encoding="utf-8"))
+                store.save(config)
+                migrated = json.loads(store.config_file.read_text(encoding="utf-8"))
             finally:
                 if old_appdata is None:
                     os.environ.pop("APPDATA", None)
@@ -33,7 +35,67 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual("old-sess", config.sessdata)
         self.assertIn("filename_template", saved)
         self.assertIn("cleanup_temp_files", saved)
+        self.assertIn("steady_mode", saved)
+        self.assertTrue(saved["steady_mode"])
+        self.assertTrue(saved["animations_enabled"])
         self.assertNotIn("speed_limit", saved)
+        self.assertEqual("old-sess", saved["sessdata"])
+        self.assertNotIn("sessdata", migrated)
+
+    def test_invalid_field_types_fall_back_to_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old_appdata = os.environ.get("APPDATA")
+            os.environ["APPDATA"] = temp_dir
+            try:
+                store = ConfigStore(app_name="BiliDownloaderInvalidConfigTest")
+                store.config_dir.mkdir(parents=True, exist_ok=True)
+                store.config_file.write_text(
+                    json.dumps(
+                        {
+                            "save_path": str(Path(temp_dir) / "downloads"),
+                            "speed_limit_mb": "invalid",
+                            "max_concurrent_tasks": 999,
+                            "steady_mode": "false",
+                            "appearance_mode": "unknown",
+                            "animations_enabled": "false",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                config = store.load()
+            finally:
+                if old_appdata is None:
+                    os.environ.pop("APPDATA", None)
+                else:
+                    os.environ["APPDATA"] = old_appdata
+
+        self.assertEqual(0.0, config.speed_limit_mb)
+        self.assertEqual(16, config.max_concurrent_tasks)
+        self.assertFalse(config.steady_mode)
+        self.assertEqual("system", config.appearance_mode)
+        self.assertFalse(config.animations_enabled)
+
+    def test_loaded_legacy_sessdata_file_can_be_removed_after_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old_appdata = os.environ.get("APPDATA")
+            os.environ["APPDATA"] = temp_dir
+            try:
+                store = ConfigStore(app_name="BiliDownloaderLegacyFileTest")
+                store.legacy_sessdata_file = Path(temp_dir) / "sessdata.txt"
+                store.legacy_sessdata_file.write_text("legacy-secret", encoding="utf-8")
+
+                config = store.load()
+                store.remove_loaded_legacy_sessdata_file()
+                legacy_file_removed = not store.legacy_sessdata_file.exists()
+            finally:
+                if old_appdata is None:
+                    os.environ.pop("APPDATA", None)
+                else:
+                    os.environ["APPDATA"] = old_appdata
+
+        self.assertEqual("legacy-secret", config.sessdata)
+        self.assertTrue(legacy_file_removed)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from bili_client.core.models import EpisodeInfo, QualityOption, safe_filename
+import re
+from string import Formatter
 
+from bili_client.core.models import EpisodeInfo, QualityOption, safe_filename
 
 DEFAULT_FILENAME_TEMPLATE = "{title}"
 
@@ -27,8 +29,13 @@ def render_filename_template(
     }
 
     try:
+        if len(pattern) > 512 or any(
+            len(spec or "") > 24 or any(int(width) > 180 for width in re.findall(r"\d+", spec or ""))
+            for _, _, spec, _ in Formatter().parse(pattern)
+        ):
+            raise ValueError("文件名模板过长")
         rendered = pattern.format_map(_SafeFormatDict(values))
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, AttributeError, IndexError):
         rendered = DEFAULT_FILENAME_TEMPLATE.format_map(_SafeFormatDict(values))
 
     return safe_filename(rendered)
