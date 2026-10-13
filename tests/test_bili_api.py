@@ -23,7 +23,14 @@ class CountingHttpClient:
         **_kwargs,
     ) -> dict:
         self.calls.append((url, extra_headers))
-        return {"code": 0, "data": {"accept_description": ["1080P"], "accept_quality": [80]}}
+        return {
+            "code": 0,
+            "data": {
+                "accept_description": ["1080P"],
+                "accept_quality": [80],
+                "dash": {"video": [{"id": 80, "baseUrl": "https://video-primary"}]},
+            },
+        }
 
 
 class StubBiliApi(BilibiliApi):
@@ -141,20 +148,18 @@ class BiliApiTests(unittest.TestCase):
         self.assertEqual("https://audio-primary", audio_stream.url)
         self.assertEqual(["https://audio-backup"], audio_stream.backup_urls)
 
-    def test_get_streams_reports_actual_fallback_quality(self) -> None:
+    def test_get_streams_rejects_fallback_quality(self) -> None:
         api = StubLowerQualityBiliApi(http_client=DummyHttpClient())  # type: ignore[arg-type]
         episode = EpisodeInfo(title="demo", bvid="BV1xx411c7mD", cid=123, is_bangumi=False)
 
-        video_stream, _audio_stream = api.get_streams(episode, qn=80)
-
-        self.assertEqual(64, video_stream.quality_qn)
-        self.assertEqual("720P", video_stream.quality_label)
+        with self.assertRaisesRegex(BiliApiError, "实际返回.*720P"):
+            api.get_streams(episode, qn=80)
 
     def test_get_streams_falls_back_to_single_durl_stream(self) -> None:
         api = StubDurlBiliApi(http_client=DummyHttpClient())  # type: ignore[arg-type]
         episode = EpisodeInfo(title="movie", bvid="BV1xx411c7mD", cid=123, is_bangumi=True)
 
-        video_stream, audio_stream = api.get_streams(episode, qn=80)
+        video_stream, audio_stream = api.get_streams(episode, qn=32)
 
         self.assertEqual("https://mp4-primary", video_stream.url)
         self.assertEqual(["https://mp4-backup"], video_stream.backup_urls)

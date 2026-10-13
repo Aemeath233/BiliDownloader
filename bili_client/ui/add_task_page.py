@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from tkinter import messagebox
@@ -78,12 +79,14 @@ class AddTaskPage(ctk.CTkFrame):
         self._last_auto_parse_url = ""
         self._auto_parse_after_id = None
         self.preferred_quality_label: str | None = None
+        self._quality_auth_scope = hashlib.sha256(self.get_config().sessdata.encode()).digest()
 
         self.parse_status_var = ctk.StringVar(value="等待链接")
         self.media_title_var = ctk.StringVar(value="尚未解析")
         self.media_info_var = ctk.StringVar(value="解析完成后会显示视频信息")
         self.selection_summary_var = ctk.StringVar(value="分集：等待解析")
         self.quality_hint_var = ctk.StringVar(value="画质：等待分集选择")
+        self.quality_access_var = ctk.StringVar(value="选择分集后，仅显示当前账号实际可下载的画质")
         self.selection_detail_var = ctk.StringVar(value="未选择分集")
         self.pagination_info_var = ctk.StringVar(value="")
         self.filename_preview_var = ctk.StringVar(value="文件名：等待解析")
@@ -335,6 +338,17 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_combo.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
         self.quality_combo.set("等待画质")
 
+        self.quality_access_label = TextLabel(
+            quality_panel,
+            textvariable=self.quality_access_var,
+            anchor="w",
+            justify="left",
+            wraplength=520,
+            text_color=PALETTE["accent"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+        )
+        self.quality_access_label.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 10))
+
         TextLabel(
             quality_panel,
             textvariable=self.filename_preview_var,
@@ -343,7 +357,7 @@ class AddTaskPage(ctk.CTkFrame):
             wraplength=540,
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-        ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 12))
+        ).grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 12))
 
         self.add_button = MotionButton(
             quality_panel,
@@ -355,7 +369,8 @@ class AddTaskPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
         )
-        self.add_button.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 14))
+        self.add_button.grid(row=4, column=0, sticky="ew", padx=14, pady=(0, 14))
+        wrap_to_panel(quality_panel, [self.quality_access_label], padding=28)
 
     def _bind_shortcuts(self) -> None:
         self.url_input.bind("<Control-Return>", self._submit_parse_shortcut)
@@ -407,8 +422,21 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_combo.configure(values=labels, state="normal")
         self.quality_combo.set(preferred)
         self._on_quality_selected(preferred)
+        if self.current_qualities:
+            self.quality_access_var.set(
+                self.current_qualities[0].availability_note
+                or "仅显示当前账号实际可下载的画质；下载前会再次校验，不会自动降档。"
+            )
 
     def update_config_preview(self, config: AppConfig) -> None:
+        scope = hashlib.sha256(config.sessdata.encode()).digest()
+        if scope != self._quality_auth_scope:
+            self._quality_auth_scope = scope
+            self.quality_cache.clear()
+            self.preferred_quality_label = None
+            self._set_quality_waiting_state("正在更新账号可下载画质")
+            if self.current_media is not None and self.active_episode_index is not None:
+                self._load_qualities_for_episode(self.active_episode_index)
         sessdata_text = "已设置" if config.sessdata.strip() else "未设置"
         speed_limit = f"{config.speed_limit_mb:.2f} MB/s" if config.speed_limit_mb > 0 else "不限速"
         strategy = "稳妥" if config.steady_mode else "标准"
@@ -685,6 +713,7 @@ class AddTaskPage(ctk.CTkFrame):
         self.quality_combo.configure(values=[text], state="disabled")
         self.quality_combo.set(text)
         self.current_qualities = []
+        self.quality_access_var.set("当前账号的可下载画质将在读取后显示，受限档位不会进入选项。")
         self._update_filename_preview()
         self._refresh_add_button_state()
 

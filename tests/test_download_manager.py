@@ -274,7 +274,7 @@ class DownloadManagerTests(unittest.TestCase):
         self.assertEqual("fresh-sess", sessdata)
         self.assertEqual(["old-sess", "fresh-sess"], api.calls)
 
-    def test_actual_stream_quality_updates_task_label(self) -> None:
+    def test_actual_stream_mismatch_stops_instead_of_relabeling(self) -> None:
         episode = EpisodeInfo(title="demo", bvid="BV1xx411c7mD", cid=1, is_bangumi=False)
         quality = QualityOption(qn=80, label="1080P")
         task_id = self.manager.create_task(
@@ -287,14 +287,15 @@ class DownloadManagerTests(unittest.TestCase):
         with self.manager._tasks_lock:
             task = self.manager._tasks[task_id]
 
-        self.manager._apply_actual_quality(
-            task_id,
-            task,
-            StreamInfo(kind="video", url="https://video", quality_qn=64, quality_label="720P"),
-        )
+        with self.assertRaisesRegex(BiliApiError, "所选画质.*实际返回.*720P"):
+            self.manager._apply_actual_quality(
+                task_id,
+                task,
+                StreamInfo(kind="video", url="https://video", quality_qn=64, quality_label="720P"),
+            )
 
         snapshot = {item["task_id"]: item for item in self.manager.snapshot()["tasks"]}
-        self.assertEqual("720P", snapshot[task_id]["quality_label"])
+        self.assertEqual("1080P", snapshot[task_id]["quality_label"])
 
     def test_persisted_unfinished_task_restores_as_retryable_canceled(self) -> None:
         store = TaskStore(Path(self.temp_dir.name) / "tasks.json")

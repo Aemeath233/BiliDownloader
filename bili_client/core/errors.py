@@ -14,6 +14,9 @@ def humanize_error(message: str) -> str:
     if not text:
         return "操作失败，但没有拿到具体原因。可以稍后重试一次。"
 
+    if "所选画质" in text and "实际返回" in text:
+        return text
+
     if _contains_any(
         lowered, ("certificate_verify_failed", "certificate verify failed", "unable to get local issuer certificate")
     ):

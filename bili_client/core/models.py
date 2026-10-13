@@ -65,6 +65,7 @@ class EpisodeInfo:
 class QualityOption:
     qn: int
     label: str
+    availability_note: str = ""
 
 
 @dataclass(slots=True)

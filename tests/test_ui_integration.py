@@ -231,3 +231,32 @@ class UiIntegrationTests(unittest.TestCase):
         self.assertEqual(2.5, self.app.current_config.speed_limit_mb)
         self.assertEqual(4, self.app.current_config.max_concurrent_tasks)
         self.assertEqual("new-session", self.app.current_config.sessdata)
+
+    def test_quality_access_message_is_visible_next_to_actual_options(self) -> None:
+        self.pump()
+        page = self.app.add_task_page
+        page.current_qualities = [QualityOption(80, "1080P", "当前最高可下载：1080P；4K 当前不可获取")]
+        page._apply_quality_options(["1080P"])
+        self.assertEqual(["1080P"], page.quality_combo.cget("values"))
+        self.assertIn("4K 当前不可获取", page.quality_access_var.get())
+
+    def test_account_change_invalidates_cached_vip_options(self) -> None:
+        self.pump()
+        page = self.app.add_task_page
+        page.current_media = MediaParseResult(
+            "https://b23.tv/demo",
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+            "demo",
+            [EpisodeInfo("demo", "BV1xx411c7mD", 1, False)],
+        )
+        page.active_episode_index = 0
+        page.quality_cache[0] = [QualityOption(120, "4K")]
+        page.current_qualities = page.quality_cache[0]
+        old_token = page._quality_request_token
+        with patch.object(page, "_load_qualities_for_episode") as reload_options:
+            page.update_config_preview(AppConfig(sessdata="other-test-account"))
+        self.assertFalse(page.quality_cache)
+        self.assertFalse(page.current_qualities)
+        self.assertNotEqual(old_token, page._quality_request_token)
+        self.assertEqual("disabled", page.quality_combo.cget("state"))
+        reload_options.assert_called_once_with(0)

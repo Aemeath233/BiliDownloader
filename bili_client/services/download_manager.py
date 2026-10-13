@@ -21,7 +21,7 @@ from bili_client.core.models import (
     TaskStatus,
     safe_filename,
 )
-from bili_client.services.bili_api import BiliApiError, BilibiliApi
+from bili_client.services.bili_api import BiliApiError, BilibiliApi, QualityUnavailableError
 from bili_client.services.ffmpeg import FFmpegService
 from bili_client.services.rate_limiter import GlobalRateLimiter
 from bili_client.services.task_store import TaskStore
@@ -652,14 +652,10 @@ class DownloadManager:
             return
         actual_label = video_stream.quality_label or f"QN {actual_qn}"
         requested_label = task.quality.label
-        actual_quality = QualityOption(qn=actual_qn, label=actual_label)
-        with self._tasks_lock:
-            current = self._tasks.get(task_id)
-            if current is not None:
-                current.quality = actual_quality
-                self._save_tasks_locked()
-        task.quality = actual_quality
-        self.logger(f"画质已自动调整：{task.title} | {requested_label} -> {actual_label}")
+        raise QualityUnavailableError(
+            f"所选画质“{requested_label}”当前不可下载，接口实际返回“{actual_label}”。"
+            "任务已停止，未自动降档；请重新选择当前可下载的画质。"
+        )
 
     def _refresh_task_sessdata(self, task_id: str, task: DownloadTask, force: bool) -> str:
         if self.auth_refresher is None:

@@ -19,6 +19,10 @@ class BiliApiError(RuntimeError):
     pass
 
 
+class QualityUnavailableError(BiliApiError):
+    pass
+
+
 class BilibiliApi:
     URL_PATTERN = re.compile(r"https?://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]+")
     REQUEST_RETRIES = 2
@@ -157,18 +161,48 @@ class BilibiliApi:
         )
 
     def get_quality_options(self, episode: EpisodeInfo, sessdata: str = "") -> list[QualityOption]:
-        data = self._playurl(episode, 116, sessdata)
+        data = self._playurl(episode, 127, sessdata)
         play_data = data.get("result", data.get("data", {}))
         self._raise_if_preview_only(play_data)
         descriptions = play_data.get("accept_description", [])
         qualities = play_data.get("accept_quality", [])
 
-        options = [
-            QualityOption(qn=int(qn), label=str(label)) for label, qn in zip(descriptions, qualities, strict=False)
-        ]
-        if not options:
-            raise BiliApiError("未读取到可用的画质选项")
-        return options
+        labels = {int(qn): str(label) for label, qn in zip(descriptions, qualities, strict=False)}
+        for item in play_data.get("support_formats", []):
+            qn = int(item.get("quality") or 0)
+            description = item.get("new_description") or item.get("description")
+            if qn and description:
+                labels.setdefault(qn, str(description))
+
+        available = {
+            int(item.get("id") or 0)
+            for item in (play_data.get("dash") or {}).get("video", [])
+            if item.get("baseUrl") or item.get("base_url")
+        }
+        if not available and (play_data.get("durl") or play_data.get("durls")):
+            available = {int(play_data.get("quality") or 0)}
+        available.discard(0)
+        if not available:
+            raise BiliApiError("当前账号没有获取到可下载的画质，请确认登录和视频访问权限后重试")
+
+        verified = sorted(available, reverse=True)
+        highest = labels.get(verified[0], f"QN {verified[0]}")
+        restricted = [label for qn, label in labels.items() if qn not in available]
+        note = f"当前分集最高可下载：{highest}。仅列出实际可获取的画质。"
+        if restricted:
+            note += f"\n当前不可获取：{'、'.join(restricted)}（受登录、会员或视频权限影响）。"
+        return [QualityOption(qn=qn, label=labels.get(qn, f"QN {qn}"), availability_note=note) for qn in verified]
+
+    @staticmethod
+    def check_requested_quality(requested_qn: int, actual_qn: int, labels: dict[int, str]) -> None:
+        if requested_qn == actual_qn:
+            return
+        requested = labels.get(requested_qn, f"QN {requested_qn}")
+        actual = labels.get(actual_qn, f"QN {actual_qn}") if actual_qn else "未知画质"
+        raise QualityUnavailableError(
+            f"所选画质“{requested}”当前不可下载，接口实际返回“{actual}”。"
+            "任务已停止，未自动降档；请重新读取画质后选择当前可下载档位。"
+        )
 
     def get_streams(self, episode: EpisodeInfo, qn: int, sessdata: str = "") -> tuple[StreamInfo, StreamInfo | None]:
         data = self._playurl(episode, qn, sessdata)
@@ -177,7 +211,7 @@ class BilibiliApi:
         dash = play_data.get("dash")
         referer = self._episode_referer(episode)
         if not dash:
-            return self._streams_from_durl(play_data, sessdata, referer)
+            return self._streams_from_durl(play_data, sessdata, referer, requested_qn=qn)
 
         video_candidates = dash.get("video", [])
         audio_candidates = dash.get("audio", [])
@@ -197,6 +231,7 @@ class BilibiliApi:
             )
         }
         actual_label = quality_labels.get(actual_qn, f"QN {actual_qn}" if actual_qn else "实际画质")
+        self.check_requested_quality(qn, actual_qn, quality_labels)
         video_urls = self._pick_stream_urls(selected_video)
         video_url = video_urls[0]
         video_size = self._probe_size(video_url, sessdata, referer=referer)
@@ -231,6 +266,7 @@ class BilibiliApi:
         play_data: dict,
         sessdata: str,
         referer: str,
+        requested_qn: int | None = None,
     ) -> tuple[StreamInfo, StreamInfo | None]:
         durl_items = play_data.get("durl") or play_data.get("durls") or []
         if not durl_items:
@@ -266,6 +302,8 @@ class BilibiliApi:
             )
         }
         actual_label = quality_labels.get(actual_qn, str(play_data.get("format") or "MP4").upper())
+        if requested_qn is not None:
+            self.check_requested_quality(requested_qn, actual_qn, quality_labels)
 
         return (
             StreamInfo(
