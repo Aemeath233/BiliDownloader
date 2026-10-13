@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from bili_client.ui.async_tasks import UiTaskRunner
 
@@ -18,6 +19,17 @@ class _FakeWidget:
 
 
 class UiTaskRunnerTests(unittest.TestCase):
+    def test_busy_frame_still_processes_at_least_one_callback(self) -> None:
+        widget = _FakeWidget()
+        runner = UiTaskRunner(widget)
+        results = []
+        runner.post(lambda: results.append(1))
+        runner.post(lambda: results.append(2))
+        with patch("bili_client.ui.async_tasks.time.perf_counter", side_effect=[0, 1]):
+            widget.callbacks.pop(0)()
+        self.assertEqual([1], results)
+        self.assertFalse(runner._callbacks.empty())
+
     def test_pages_share_the_same_dispatcher(self) -> None:
         root = _FakeWidget()
         page = type("Page", (), {"winfo_toplevel": lambda _self: root})()

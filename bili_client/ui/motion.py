@@ -34,7 +34,7 @@ class Motion:
 
     FRAME_MS = 16
 
-    def __init__(self, widget, enabled: bool = True, clock=time.monotonic) -> None:
+    def __init__(self, widget, enabled: bool = True, clock=time.perf_counter) -> None:
         self.widget = widget
         self.enabled = enabled
         self.clock = clock

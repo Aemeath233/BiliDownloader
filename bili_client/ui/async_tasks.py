@@ -40,10 +40,10 @@ class _Dispatcher:
 
     def drain(self) -> None:
         self._after_id = None
-        deadline = time.monotonic() + self.BUDGET_SECONDS
+        deadline = time.perf_counter() + self.BUDGET_SECONDS
         try:
-            for _ in range(self.MAX_CALLBACKS):
-                if self._closed or time.monotonic() >= deadline:
+            for index in range(self.MAX_CALLBACKS):
+                if self._closed or (index > 0 and time.perf_counter() >= deadline):
                     break
                 try:
                     callback = self.callbacks.get_nowait()
