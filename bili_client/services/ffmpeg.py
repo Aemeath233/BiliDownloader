@@ -71,7 +71,7 @@ class FFmpegService:
         audio_path: Path | None,
         output_path: Path,
         cancel_event: threading.Event | None = None,
-    ) -> None:
+    ) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = output_path.with_name(
             f".{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix or '.mp4'}"
@@ -106,13 +106,32 @@ class FFmpegService:
 
             if process.returncode != 0:
                 raise RuntimeError((stderr or "").strip() or "FFmpeg 合并失败")
-            os.replace(temporary_output, output_path)
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("已取消")
+            return self._publish_output(temporary_output, output_path)
         except Exception:
             try:
                 temporary_output.unlink(missing_ok=True)
             except OSError:
                 pass
             raise
+
+    @staticmethod
+    def _publish_output(temporary: Path, requested: Path) -> Path:
+        """Commit without overwriting files created while the task was running."""
+        counter = 0
+        while True:
+            candidate = requested if not counter else requested.with_stem(f"{requested.stem} ({counter})")
+            try:
+                if os.name == "nt":
+                    # Windows rename fails atomically when the destination exists.
+                    os.rename(temporary, candidate)
+                else:
+                    os.link(temporary, candidate)
+                    temporary.unlink()
+                return candidate
+            except FileExistsError:
+                counter += 1
 
     @staticmethod
     def _hidden_process_options() -> dict:

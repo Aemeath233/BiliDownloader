@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -86,11 +87,11 @@ class MainWindow(ctk.CTk):
 
         self.title("BiliDownloader")
         scaling = self._get_window_scaling()
-        width = min(1360, self.winfo_screenwidth() - 60)
-        height = min(840, self.winfo_screenheight() - 90)
-        self.minsize(1000, 640)
-        left = max(0, round((self.winfo_screenwidth() - width) * scaling / 2))
-        top = max(0, round((self.winfo_screenheight() - height) * scaling / 2) - 24)
+        width = min(1360, max(320, int((self.winfo_screenwidth() - 48) / scaling)))
+        height = min(840, max(240, int((self.winfo_screenheight() - 96) / scaling)))
+        self.minsize(min(1000, width), min(640, height))
+        left = max(0, round((self.winfo_screenwidth() - width * scaling) / 2))
+        top = max(0, round((self.winfo_screenheight() - height * scaling) / 2) - 24)
         self.geometry(f"{width}x{height}+{left}+{top}")
         if self.icon_path is not None:
             try:
@@ -106,6 +107,8 @@ class MainWindow(ctk.CTk):
         self._build_sidebar()
         self._build_topbar()
         self._build_page_container()
+        self._compact_layout = None
+        self.bind("<Configure>", self._adapt_window, add="+")
         self._bind_shortcuts()
         self.toast = Toast(self)
         self.after_idle(self._record_first_frame)
@@ -202,13 +205,14 @@ class MainWindow(ctk.CTk):
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.grid(row=0, column=0, sticky="ew", padx=18, pady=(22, 18))
-        TextLabel(
+        self.brand_label = TextLabel(
             brand,
             text="BiliDownloader",
             anchor="w",
             text_color=PALETTE["sidebar_heading"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=22, weight="bold"),
-        ).pack(anchor="w")
+        )
+        self.brand_label.pack(anchor="w")
         TextLabel(
             brand,
             text="B 站视频下载客户端",
@@ -256,13 +260,29 @@ class MainWindow(ctk.CTk):
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 2))
-        TextLabel(
+        self.shortcut_label = TextLabel(
             footer,
             text="Ctrl+F 搜索 · Ctrl+1–4 切页",
             anchor="w",
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-        ).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        )
+        self.shortcut_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+
+    def _adapt_window(self, event) -> None:
+        if event.widget is not self:
+            return
+        compact = event.width / self._get_window_scaling() < 1100
+        if compact == self._compact_layout:
+            return
+        self._compact_layout = compact
+        self.grid_columnconfigure(0, minsize=180 if compact else 238)
+        self.brand_label.configure(text="Bili 下载器" if compact else "BiliDownloader")
+        self.shortcut_label.configure(text="Ctrl+1–4 切页" if compact else "Ctrl+F 搜索 · Ctrl+1–4 切页")
+        if compact:
+            self._topbar_stats.grid_remove()
+        else:
+            self._topbar_stats.grid()
 
     def _build_topbar(self) -> None:
         topbar = ctk.CTkFrame(self, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
@@ -290,7 +310,7 @@ class MainWindow(ctk.CTk):
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=1, column=0, sticky="ew", pady=(3, 0))
 
-        stats_frame = ctk.CTkFrame(topbar, fg_color="transparent")
+        stats_frame = self._topbar_stats = ctk.CTkFrame(topbar, fg_color="transparent")
         stats_frame.grid(row=0, column=1, sticky="e", padx=12, pady=12)
 
         self.total_speed_var = ctk.StringVar(value="0 B/s")
@@ -377,6 +397,10 @@ class MainWindow(ctk.CTk):
                 on_retry_failed=self._retry_failed_tasks,
                 on_clear_finished=self._clear_finished_tasks,
                 on_open_dir=self._open_dir,
+                on_reselect=self._reselect_task_quality,
+                on_reveal=self._reveal_file,
+                on_play=self._play_file,
+                on_batch_action=self._batch_action,
             )
         elif page_key == "settings":
             from bili_client.ui.settings_page import SettingsPage
@@ -385,6 +409,7 @@ class MainWindow(ctk.CTk):
                 self.page_container,
                 on_save_config=self._save_config,
                 auth_service=self.auth_service,
+                on_save_account=self._save_account,
             )
             page.load_config(self.current_config)
         elif page_key == "logs":
@@ -511,8 +536,8 @@ class MainWindow(ctk.CTk):
     def _save_config(self, config: AppConfig) -> None:
         if self.auth_service is not None and config.sessdata != self.current_config.sessdata:
             self.auth_service.set_sessdata(config.sessdata)
-        self.current_config = config
         self.config_store.save(config)
+        self.current_config = config
         self.manager.update_config(config)
         self.api.http_client.set_steady_mode(config.steady_mode)
         self.ffmpeg.set_command(config.ffmpeg_path)
@@ -521,6 +546,9 @@ class MainWindow(ctk.CTk):
         self._refresh_theme()
         self.add_task_page.update_config_preview(config)
         self.emit_log("全局设置已保存")
+
+    def _save_account(self, sessdata: str) -> None:
+        self._save_config(replace(self.current_config, sessdata=sessdata))
 
     def _start_silent_auth_check(self) -> None:
         if self.auth_service is None:
@@ -567,8 +595,10 @@ class MainWindow(ctk.CTk):
     def _apply_refreshed_config_to_ui(self, config: AppConfig) -> None:
         self.add_task_page.update_config_preview(config)
         settings_page = self.pages.get("settings")
-        if settings_page is not None and not settings_page.has_unsaved_changes():
-            settings_page.load_config(config)
+        if settings_page is not None:
+            settings_page.sync_account(config.sessdata)
+            if not settings_page.has_unsaved_changes():
+                settings_page.load_config(config)
 
     def _refresh_theme(self) -> None:
         self.configure(fg_color=PALETTE["app_bg"])
@@ -579,7 +609,50 @@ class MainWindow(ctk.CTk):
         self._queue_action(f"cancel-{task_id}", lambda: self.manager.cancel_task(task_id), "已请求取消任务")
 
     def _retry_task(self, task_id: str) -> None:
-        self._queue_action(f"retry-{task_id}", lambda: self.manager.retry_task(task_id), "任务已重新加入队列")
+        self._queue_action(
+            f"retry-{task_id}", lambda: self.manager.retry_task(task_id), "任务已重新加入队列，将从头下载"
+        )
+
+    def _reselect_task_quality(self, task_id: str) -> None:
+        spec = self.manager.get_task_spec(task_id)
+        if spec is None:
+            self.notify("任务状态已更新，请刷新后重试", "warning")
+            return
+        self.show_page("parse")
+        self.add_task_page.prepare_retry(spec)
+
+    def _batch_action(self, action: str, task_ids: set[str]) -> None:
+        def work():
+            if action == "retry":
+                return self.manager.retry_terminal_tasks(task_ids=task_ids)
+            operation = self.manager.cancel_task if action == "cancel" else self.manager.remove_task
+            return sum(bool(operation(task_id)) for task_id in task_ids)
+
+        self._queue_action(f"batch-{action}", work, "批量操作已完成；重试从头下载，移除记录保留文件")
+
+    def _reveal_file(self, path: str) -> None:
+        if not Path(path).is_file():
+            self.notify("文件不存在，可能已被移动或删除", "warning")
+            return
+        if os.name == "nt":
+            subprocess.Popen(
+                [
+                    str(Path(os.environ.get("WINDIR", "C:/Windows")) / "explorer.exe"),
+                    "/select,",
+                    str(Path(path).resolve()),
+                ]
+            )
+        else:
+            self._open_dir(str(Path(path).parent))
+
+    def _play_file(self, path: str) -> None:
+        if not Path(path).is_file():
+            self.notify("文件不存在，可能已被移动或删除", "warning")
+            return
+        try:
+            os.startfile(str(Path(path).resolve()))
+        except (OSError, AttributeError) as exc:
+            self.notify(f"无法打开视频：{exc}", "error")
 
     def _remove_task(self, task_id: str) -> None:
         self._queue_action(
@@ -651,6 +724,11 @@ class MainWindow(ctk.CTk):
         else:
             metrics = self.manager.metrics()
         self._update_dashboard(metrics)
+        persistence_error = getattr(self.manager, "persistence_error", "")
+        if isinstance(persistence_error, str) and persistence_error != getattr(self, "_last_persistence_error", ""):
+            self._last_persistence_error = persistence_error
+            if persistence_error:
+                self.notify("任务记录保存失败，下载继续；请检查磁盘空间和目录权限", "error")
         interval = self.POLL_INTERVAL_MS if metrics["active_count"] or metrics["queued_count"] else 1000
         if self.state() == "iconic":
             interval = 1500
@@ -721,7 +799,19 @@ class MainWindow(ctk.CTk):
         if self.manager is None:
             self.destroy()
         else:
-            self.ui_tasks.run("app-shutdown", self.manager.shutdown, on_success=lambda _result: self.destroy())
+            self.ui_tasks.run(
+                "app-shutdown",
+                self.manager.shutdown,
+                on_error=self._report_shutdown_error,
+                on_finally=self.destroy,
+            )
+
+    def _report_shutdown_error(self, error: Exception) -> None:
+        try:
+            self.emit_log(f"退出时保存任务记录失败：{error}")
+        except Exception:
+            pass
+        messagebox.showwarning("任务记录未保存", f"程序将退出，最近的任务记录可能未保存。\n\n{error}", parent=self)
 
     def destroy(self) -> None:
         self._closing = True

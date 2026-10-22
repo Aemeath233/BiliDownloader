@@ -31,10 +31,11 @@ APPEARANCE_VALUES = {label: value for value, label in APPEARANCE_LABELS.items()}
 
 
 class SettingsPage(ctk.CTkFrame):
-    def __init__(self, master, on_save_config, auth_service: AuthService | None = None) -> None:
+    def __init__(self, master, on_save_config, auth_service: AuthService | None = None, on_save_account=None) -> None:
         super().__init__(master, fg_color=PALETTE["app_bg"])
         self.on_save_config = on_save_config
         self.auth_service = auth_service
+        self.on_save_account = on_save_account
         self._loaded_form_values: dict[str, str] = {}
         self._last_ffmpeg_preview = None
         self.show_sessdata_var = ctk.BooleanVar(value=False)
@@ -454,6 +455,16 @@ class SettingsPage(ctk.CTkFrame):
     def has_unsaved_changes(self) -> bool:
         return self._has_unsaved_changes()
 
+    def sync_account(self, sessdata: str) -> None:
+        """Refresh account state without replacing a user's preference edits."""
+        previous = self._loaded_form_values.get("sessdata", "")
+        if self.sessdata_entry.get().strip() == previous:
+            self.sessdata_entry.delete(0, "end")
+            self.sessdata_entry.insert(0, sessdata)
+        self._loaded_form_values["sessdata"] = sessdata
+        self._update_auth_status(sessdata)
+        self._update_form_feedback()
+
     def _on_form_changed(self) -> None:
         self._update_ffmpeg_status()
         self._update_form_feedback()
@@ -534,7 +545,12 @@ class SettingsPage(ctk.CTkFrame):
             messagebox.showerror("设置错误", str(exc))
             return
 
-        self.on_save_config(config)
+        try:
+            self.on_save_config(config)
+        except Exception as exc:
+            self.save_result_label.configure(text=f"保存失败：{exc}", text_color=PALETTE["error"])
+            notify(self, "设置未保存，请检查存储位置后重试", "error")
+            return
         self._mark_config_saved(config)
         self.save_result_label.configure(text="全局设置已保存", text_color=PALETTE["success"])
         notify(self, "设置已保存")
@@ -613,7 +629,11 @@ class SettingsPage(ctk.CTkFrame):
         self.sessdata_entry.delete(0, "end")
         self.sessdata_entry.insert(0, session.sessdata)
         self._on_form_changed()
-        if save:
+        if save and self.on_save_account is not None:
+            self.on_save_account(session.sessdata)
+            self._loaded_form_values["sessdata"] = session.sessdata
+            self._update_form_feedback()
+        elif save:
             self._save_settings()
 
     def _update_auth_status(self, sessdata: str) -> None:

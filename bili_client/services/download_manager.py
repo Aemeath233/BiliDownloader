@@ -25,6 +25,7 @@ from bili_client.services.bili_api import BiliApiError, BilibiliApi, QualityUnav
 from bili_client.services.ffmpeg import FFmpegService
 from bili_client.services.rate_limiter import GlobalRateLimiter
 from bili_client.services.task_store import TaskStore
+from bili_client.services.task_writer import TaskWriter
 
 TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELED}
 RETRYABLE_STATUSES = {TaskStatus.FAILED, TaskStatus.CANCELED}
@@ -74,6 +75,7 @@ class DownloadManager:
         self._rate_limiter = GlobalRateLimiter(int(max(0.0, config.speed_limit_mb) * 1024 * 1024))
         self.ffmpeg.set_command(config.ffmpeg_path)
 
+        self._task_writer = TaskWriter(self._write_task_snapshot, self.logger)
         self._load_persisted_tasks()
 
         self._scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True, name="download-scheduler")
@@ -217,7 +219,7 @@ class DownloadManager:
             self.logger(f"已清理 {len(removable_ids)} 个已结束任务")
         return len(removable_ids)
 
-    def retry_terminal_tasks(self, statuses: set[TaskStatus] | None = None) -> int:
+    def retry_terminal_tasks(self, statuses: set[TaskStatus] | None = None, task_ids: set[str] | None = None) -> int:
         retry_statuses = statuses or RETRYABLE_STATUSES
         with self._tasks_lock:
             specs = [
@@ -230,7 +232,7 @@ class DownloadManager:
                     filename_stem=Path(task.output_path).stem,
                 )
                 for task in self._tasks.values()
-                if task.status in retry_statuses
+                if task.status in retry_statuses and (task_ids is None or task.task_id in task_ids)
             ]
 
         created_ids = self.create_tasks(specs)
@@ -238,6 +240,23 @@ class DownloadManager:
         if created_ids:
             self.logger(f"已重新加入 {len(created_ids)} 个失败/取消任务")
         return len(created_ids)
+
+    def count_duplicates(self, episodes: list[EpisodeInfo], qn: int) -> int:
+        identities = {(episode.bvid, episode.cid, episode.is_bangumi) for episode in episodes}
+        with self._tasks_lock:
+            return sum(
+                task.quality.qn == qn
+                and task.status not in RETRYABLE_STATUSES
+                and (task.episode.bvid, task.episode.cid, task.episode.is_bangumi) in identities
+                for task in self._tasks.values()
+            )
+
+    def get_task_spec(self, task_id: str) -> DownloadTaskSpec | None:
+        with self._tasks_lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.status not in RETRYABLE_STATUSES:
+                return None
+            return DownloadTaskSpec(task.source_url, task.episode, task.quality, task.save_dir, task.sessdata)
 
     def retry_task(self, task_id: str) -> str | None:
         with self._tasks_lock:
@@ -346,9 +365,10 @@ class DownloadManager:
             workers = list(self._workers.values())
             self._save_tasks_locked()
 
-        self._scheduler_thread.join(timeout=1.5)
+        deadline = time.monotonic() + 5.0
+        self._scheduler_thread.join(timeout=max(0, deadline - time.monotonic()))
         for worker in workers:
-            worker.join(timeout=5.0)
+            worker.join(timeout=max(0, deadline - time.monotonic()))
         self._save_tasks()
 
     def _load_persisted_tasks(self) -> None:
@@ -382,12 +402,27 @@ class DownloadManager:
     def _save_tasks(self) -> None:
         with self._tasks_lock:
             self._save_tasks_locked()
+        self.flush_persistence()
+
+    @property
+    def persistence_error(self) -> str:
+        return self._task_writer.error
+
+    def flush_persistence(self) -> None:
+        self._task_writer.flush()
 
     def _save_tasks_locked(self) -> None:
         if self.task_store is None:
             return
-        tasks = sorted(self._tasks.values(), key=lambda item: item.created_at)
-        self.task_store.save([self._task_to_payload(task) for task in tasks])
+        self._task_writer.request()
+
+    def _write_task_snapshot(self) -> None:
+        if self.task_store is None:
+            return
+        with self._tasks_lock:
+            payload = [self._task_to_payload(task) for task in self._tasks.values()]
+        payload.sort(key=lambda item: item["created_at"])
+        self.task_store.save(payload)
 
     def _task_to_payload(self, task: DownloadTask) -> dict:
         return {
@@ -583,7 +618,7 @@ class DownloadManager:
             self._ensure_not_cancelled(cancel_event)
 
             self._set_status(task_id, TaskStatus.MERGING, "FFmpeg 合并中")
-            self.ffmpeg.merge(
+            published_path = self.ffmpeg.merge(
                 video_path=video_path,
                 audio_path=audio_path if audio_stream else None,
                 output_path=Path(task.output_path),
@@ -593,6 +628,8 @@ class DownloadManager:
 
             with self._tasks_lock:
                 task = self._tasks[task_id]
+                if isinstance(published_path, Path):
+                    task.output_path = str(published_path)
                 task.progress.percent = 100.0
                 task.progress.speed_bps = 0.0
                 task.finished_at = time.time()

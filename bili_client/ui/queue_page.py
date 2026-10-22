@@ -56,7 +56,19 @@ def matches_filter(snapshot: dict, filter_key: str) -> bool:
 
 
 class TaskCard(ctk.CTkFrame):
-    def __init__(self, master, task_id: str, on_cancel, on_retry, on_remove, on_open_dir) -> None:
+    def __init__(
+        self,
+        master,
+        task_id: str,
+        on_cancel,
+        on_retry,
+        on_remove,
+        on_open_dir,
+        on_reselect=None,
+        on_reveal=None,
+        on_play=None,
+        on_select=None,
+    ) -> None:
         super().__init__(
             master,
             fg_color=PALETTE["panel_bg"],
@@ -69,6 +81,10 @@ class TaskCard(ctk.CTkFrame):
         self.on_retry = on_retry
         self.on_remove = on_remove
         self.on_open_dir = on_open_dir
+        self.on_reveal = on_reveal
+        self.output_path = ""
+        self._completed = False
+        self.selected_var = ctk.BooleanVar(value=False)
         self.save_dir = ""
         self._last_snapshot: dict | None = None
         self._render_values: dict = {}
@@ -101,7 +117,11 @@ class TaskCard(ctk.CTkFrame):
             text="目录",
             width=64,
             height=28,
-            command=lambda: self.on_open_dir(self.save_dir),
+            command=lambda: (
+                self.on_reveal(self.output_path)
+                if self._completed and self.on_reveal
+                else self.on_open_dir(self.save_dir)
+            ),
             corner_radius=CARD_RADIUS,
             **button_style("secondary"),
         )
@@ -187,6 +207,39 @@ class TaskCard(ctk.CTkFrame):
         )
         self.detail_label.grid(row=4, column=0, columnspan=6, sticky="ew", padx=14, pady=(0, 12))
 
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.grid(row=5, column=0, columnspan=6, sticky="ew", padx=14, pady=(0, 10))
+        footer.grid_columnconfigure(1, weight=1)
+        ctk.CTkCheckBox(
+            footer,
+            text="选择",
+            variable=self.selected_var,
+            width=68,
+            checkbox_width=18,
+            checkbox_height=18,
+            fg_color=PALETTE["primary"],
+            hover_color=PALETTE["primary_hover"],
+            command=lambda: on_select(self.task_id, bool(self.selected_var.get())) if on_select else None,
+        ).grid(row=0, column=0, sticky="w")
+        self.reselect_button = MotionButton(
+            footer,
+            text="重选画质",
+            width=82,
+            height=26,
+            command=lambda: on_reselect(self.task_id) if on_reselect else None,
+            **button_style("secondary"),
+        )
+        self.reselect_button.grid(row=0, column=2, padx=(8, 0))
+        self.play_button = MotionButton(
+            footer,
+            text="打开视频",
+            width=82,
+            height=26,
+            command=lambda: on_play(self.output_path) if on_play else None,
+            **button_style("secondary"),
+        )
+        self.play_button.grid(row=0, column=3, padx=(8, 0))
+
     def update_card(self, snapshot: dict) -> None:
         if snapshot == self._last_snapshot:
             return
@@ -198,6 +251,8 @@ class TaskCard(ctk.CTkFrame):
         self._configure_changed(self.title_label, text=snapshot["title"])
 
         self.save_dir = snapshot["save_dir"]
+        self.output_path = snapshot["output_path"]
+        self._completed = snapshot["status"] == "completed"
         output_name = Path(snapshot["output_path"]).name
         self._configure_changed(self.meta_label, text=f"{snapshot['quality_label']}  ·  {output_name}")
 
@@ -228,6 +283,9 @@ class TaskCard(ctk.CTkFrame):
         )
 
         self._configure_changed(self.open_button, state="normal" if self.save_dir else "disabled")
+        self._configure_changed(self.open_button, text="定位" if self._completed else "目录")
+        self._configure_changed(self.reselect_button, state="normal" if snapshot.get("can_retry") else "disabled")
+        self._configure_changed(self.play_button, state="normal" if self._completed else "disabled")
         if snapshot.get("can_retry"):
             self._configure_changed(self.retry_button, state="normal", **button_style("primary"))
         else:
@@ -237,6 +295,7 @@ class TaskCard(ctk.CTkFrame):
             self.cancel_button,
             state="normal" if snapshot["can_cancel"] else "disabled",
             text="取消中" if snapshot["cancel_requested"] else "取消",
+            **button_style("danger" if snapshot["can_cancel"] else "secondary"),
         )
 
         if snapshot["status"] == "completed":
@@ -274,6 +333,10 @@ class QueuePage(ctk.CTkFrame):
         on_retry_failed,
         on_clear_finished,
         on_open_dir,
+        on_reselect=None,
+        on_reveal=None,
+        on_play=None,
+        on_batch_action=None,
     ) -> None:
         super().__init__(master, fg_color=PALETTE["app_bg"])
         self.on_cancel_task = on_cancel_task
@@ -282,6 +345,9 @@ class QueuePage(ctk.CTkFrame):
         self.on_retry_failed = on_retry_failed
         self.on_clear_finished = on_clear_finished
         self.on_open_dir = on_open_dir
+        self.on_reselect, self.on_reveal, self.on_play = on_reselect, on_reveal, on_play
+        self.on_batch_action = on_batch_action
+        self._selected_ids: set[str] = set()
         self.task_cards: dict[str, TaskCard] = {}
         self._last_tasks: list[dict] = []
         self._visible_task_ids: tuple[str, ...] = ()
@@ -394,6 +460,28 @@ class QueuePage(ctk.CTkFrame):
             **button_style("secondary"),
         ).grid(row=0, column=2)
 
+        selection_bar = ctk.CTkFrame(header, fg_color="transparent")
+        selection_bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.selection_var = ctk.StringVar(value="已选 0 项")
+        TextLabel(selection_bar, textvariable=self.selection_var, text_color=PALETTE["muted"]).pack(
+            side="left", padx=(0, 10)
+        )
+        for title, action in (
+            ("选中本页", "select"),
+            ("清空选择", "clear"),
+            ("取消选中", "cancel"),
+            ("重试选中", "retry"),
+            ("移除选中", "remove"),
+        ):
+            MotionButton(
+                selection_bar,
+                text=title,
+                width=78,
+                height=28,
+                command=lambda action=action: self._selection_action(action),
+                **button_style("secondary"),
+            ).pack(side="left", padx=(0, 6))
+
         self.task_scroll = ctk.CTkScrollableFrame(list_panel, fg_color="transparent")
         self.task_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 12))
         self.task_scroll.grid_columnconfigure(0, weight=1)
@@ -497,6 +585,8 @@ class QueuePage(ctk.CTkFrame):
             variable.set(value)
 
     def _render_tasks(self, tasks: list[dict]) -> None:
+        self._selected_ids.intersection_update(task["task_id"] for task in tasks)
+        self.selection_var.set(f"已选 {len(self._selected_ids)} 项")
         filter_key = FILTER_OPTIONS.get(self.filter_segment.get(), "all")
         keyword = self.search_entry.get().strip().casefold()
         filtered_tasks = [
@@ -545,6 +635,7 @@ class QueuePage(ctk.CTkFrame):
             if layout_changed:
                 card.grid(row=index, column=0, sticky="ew", padx=8, pady=6)
             card.update_card(task)
+            card.selected_var.set(task_id in self._selected_ids)
 
         self._visible_task_ids = visible_ids
         self._pending_card_ids = [task_id for task_id in visible_ids if task_id not in self.task_cards]
@@ -568,11 +659,35 @@ class QueuePage(ctk.CTkFrame):
                 on_retry=self.on_retry_task,
                 on_remove=self.on_remove_task,
                 on_open_dir=self.on_open_dir,
+                on_reselect=self.on_reselect,
+                on_reveal=self.on_reveal,
+                on_play=self.on_play,
+                on_select=self._select_task,
             )
             self.task_cards[task_id] = card
             card.grid(row=self._visible_task_ids.index(task_id), column=0, sticky="ew", padx=8, pady=6)
             card.update_card(snapshot)
+            card.selected_var.set(task_id in self._selected_ids)
             if time.monotonic() >= deadline:
                 break
         if self._active and self._pending_card_ids:
             self._card_after_id = self.after(8, self._create_pending_cards)
+
+    def _select_task(self, task_id: str, selected: bool) -> None:
+        if selected:
+            self._selected_ids.add(task_id)
+        else:
+            self._selected_ids.discard(task_id)
+        self.selection_var.set(f"已选 {len(self._selected_ids)} 项")
+
+    def _selection_action(self, action: str) -> None:
+        if action == "select":
+            self._selected_ids.update(self._visible_task_ids)
+        elif action == "clear":
+            self._selected_ids.clear()
+        elif self._selected_ids and self.on_batch_action is not None:
+            self.on_batch_action(action, set(self._selected_ids))
+            return
+        for task_id, card in self.task_cards.items():
+            card.selected_var.set(task_id in self._selected_ids)
+        self.selection_var.set(f"已选 {len(self._selected_ids)} 项")

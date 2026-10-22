@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = "Stop"
+﻿param([switch]$IncludeFolder)
+
+$ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $ProjectRoot
@@ -28,6 +30,11 @@ try {
     }
     Invoke-BuildPython "-m" "PyInstaller" "--noconfirm" "--distpath" "dist\portable" "--workpath" "build\portable" "portable.spec"
     Write-Host "Portable executable: $ProjectRoot\dist\portable\BiliDownloader-Portable.exe"
+    if ($IncludeFolder) {
+        Invoke-BuildPython "-m" "PyInstaller" "--noconfirm" "--distpath" "dist\folder" "--workpath" "build\folder" "main.spec"
+        Compress-Archive -LiteralPath "dist\folder\BiliDownloader" -DestinationPath "dist\portable\BiliDownloader-Folder-Portable.zip" -Force
+        Write-Host "Folder portable archive: $ProjectRoot\dist\portable\BiliDownloader-Folder-Portable.zip"
+    }
 } finally {
     Pop-Location
 }

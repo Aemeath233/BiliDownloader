@@ -319,6 +319,7 @@ class DownloadManagerTests(unittest.TestCase):
             sessdata="sess",
         )
 
+        manager.flush_persistence()
         restored = DownloadManager(
             api=FakeApi(),  # type: ignore[arg-type]
             ffmpeg=FakeFFmpeg(),  # type: ignore[arg-type]
@@ -351,6 +352,7 @@ class DownloadManagerTests(unittest.TestCase):
         quality = QualityOption(qn=80, label="1080P")
 
         manager.create_task("https://example/video", episode, quality, self.temp_dir.name, "secret-session")
+        manager.flush_persistence()
 
         payload = json.loads(store.tasks_file.read_text(encoding="utf-8"))
         self.assertNotIn("sessdata", payload[0])
@@ -369,6 +371,7 @@ class DownloadManagerTests(unittest.TestCase):
         )
         manager.shutdown()
         task_id = manager.create_task("https://example/video", episode, quality, self.temp_dir.name, "")
+        manager.flush_persistence()
         payload = json.loads(store.tasks_file.read_text(encoding="utf-8"))
         payload[0]["sessdata"] = "legacy-secret"
         store.save(payload)

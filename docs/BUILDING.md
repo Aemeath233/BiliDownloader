@@ -28,6 +28,8 @@ CI 在 Windows 的 Python 3.11 和 3.12 下执行检查，GitHub Actions 固定�
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_portable.ps1
+# 同时构建完整文件夹 ZIP：
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_portable.ps1 -IncludeFolder
 ```
 
 脚本优先使用 uv 与 Python 3.11；没有 uv 时使用 `.venv` 或 PATH 中的 Python，请预先安装 `requirements-build.txt`。输出：
@@ -53,6 +55,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_installer.ps1
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/verify_portable.py
+.\.venv\Scripts\python.exe scripts/verify_portable.py --folder
 ```
 
 验证工具使用独立临时账号目录，复制一个 exe、移除 Python 环境变量并限制 PATH，验证启动、DLL、真实 FFmpeg 合并和正常退出清理。报告位于 `build/portable-verification.json`，不写入用户现有设置。

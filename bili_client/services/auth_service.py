@@ -111,6 +111,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
         self.logger = logger or (lambda _message: None)
         self.check_interval_seconds = max(0.0, check_interval_seconds)
         self._session: AuthSession | None = None
+        self._signed_out = False
         self._lock = threading.RLock()
         self._refresh_lock = threading.Lock()
 
@@ -144,6 +145,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
                 payload = {"version": 2, "session": session.to_json()}
             atomic_write_text(self.auth_file, json.dumps(payload, ensure_ascii=False, indent=2))
             self._session = session
+            self._signed_out = False
 
     def _decode_stored_session(self, stored) -> tuple[dict[str, Any], bool]:
         if not isinstance(stored, dict):
@@ -173,7 +175,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
             raise AuthError("二维码接口返回不完整")
         return QrLoginInfo(url=login_url, qrcode_key=qrcode_key)
 
-    def poll_qr_login(self, qrcode_key: str) -> QrPollResult:
+    def poll_qr_login(self, qrcode_key: str, *, save: bool = True) -> QrPollResult:
         response = self.http_client.get(self.QR_POLL_URL, params={"qrcode_key": qrcode_key}, retries=1)
         payload = response.json()
         if payload.get("code") != 0:
@@ -192,14 +194,17 @@ JNrRuoEUXpabUzGB8QIDAQAB
         if not session.sessdata:
             raise AuthError("登录成功，但没有拿到 SESSDATA")
 
-        self.save_session(session)
+        if save:
+            self.save_session(session)
         return QrPollResult(code=0, message="登录成功", session=session)
 
     def ensure_latest_session(self, fallback_sessdata: str = "", force: bool = False) -> AuthSession | None:
         with self._refresh_lock:
-            session = self.load_session()
-            if session is None and fallback_sessdata.strip():
-                session = AuthSession(cookies={"SESSDATA": fallback_sessdata.strip()})
+            with self._lock:
+                session = self.load_session()
+                if session is None and fallback_sessdata.strip() and not self._signed_out:
+                    session = AuthSession(cookies={"SESSDATA": fallback_sessdata.strip()})
+                    self._session = session
 
             if session is None or not session.sessdata:
                 return None
@@ -233,9 +238,9 @@ JNrRuoEUXpabUzGB8QIDAQAB
             timestamp_ms = int(data.get("timestamp") or round(time.time() * 1000))
             return self._refresh_session(session, timestamp_ms)
 
-    def _save_if_current(self, original: AuthSession, updated: AuthSession) -> AuthSession:
+    def _save_if_current(self, original: AuthSession, updated: AuthSession) -> AuthSession | None:
         with self._lock:
-            if self._session is not None and self._session is not original:
+            if self._session is not original:
                 return self._session
             self.save_session(updated)
             return updated
@@ -252,6 +257,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
             else:
                 self.auth_file.unlink(missing_ok=True)
                 self._session = None
+                self._signed_out = True
 
     def _cookie_info(self, session: AuthSession) -> dict[str, Any]:
         params = {"csrf": session.csrf} if session.csrf else None
@@ -262,7 +268,7 @@ JNrRuoEUXpabUzGB8QIDAQAB
             retries=1,
         )
 
-    def _refresh_session(self, session: AuthSession, timestamp_ms: int) -> AuthSession:
+    def _refresh_session(self, session: AuthSession, timestamp_ms: int) -> AuthSession | None:
         refresh_csrf = self._get_refresh_csrf(session, timestamp_ms)
         old_refresh_token = session.refresh_token
         response = self.http_client.post(

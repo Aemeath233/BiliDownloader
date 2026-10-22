@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import json
 import os
@@ -89,7 +90,16 @@ def app_window(process_id: int):
 
 
 def main() -> None:
-    executable = ROOT / "dist" / "portable" / "BiliDownloader-Portable.exe"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--folder", action="store_true", help="Verify the complete folder build instead of the single EXE"
+    )
+    folder = parser.parse_args().folder
+    executable = (
+        ROOT / "dist" / "folder" / "BiliDownloader" / "BiliDownloader.exe"
+        if folder
+        else ROOT / "dist" / "portable" / "BiliDownloader-Portable.exe"
+    )
     if not executable.is_file():
         raise FileNotFoundError(executable)
     with socket.socket() as probe:
@@ -101,10 +111,13 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="bili-portable-check-") as temporary:
         sandbox = Path(temporary)
         launch_dir = sandbox / "单文件 空目录"
-        launch_dir.mkdir()
         copied = launch_dir / executable.name
-        shutil.copy2(executable, copied)
-        assert list(launch_dir.iterdir()) == [copied]
+        if folder:
+            shutil.copytree(executable.parent, launch_dir)
+        else:
+            launch_dir.mkdir()
+            shutil.copy2(executable, copied)
+            assert list(launch_dir.iterdir()) == [copied]
         runtime_temp = sandbox / "runtime"
         runtime_temp.mkdir()
         env = dict(
@@ -139,7 +152,7 @@ def main() -> None:
                 raise RuntimeError("Portable window or ready marker did not appear within 45 seconds")
             report["ready_seconds"] = round(time.perf_counter() - started, 3)
             report["startup_log"] = startup_log
-            extracted = next(runtime_temp.glob("_MEI*"))
+            extracted = launch_dir / "_internal" if folder else next(runtime_temp.glob("_MEI*"))
             for relative in (
                 "python311.dll",
                 "VCRUNTIME140.dll",
@@ -196,7 +209,7 @@ def main() -> None:
         if not report["runtime_cleaned_after_exit"]:
             raise RuntimeError("Runtime extraction was not cleaned up after normal exit")
 
-    output = ROOT / "build" / "portable-verification.json"
+    output = ROOT / "build" / ("folder-verification.json" if folder else "portable-verification.json")
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=True, indent=2))

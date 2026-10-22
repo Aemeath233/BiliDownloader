@@ -1,5 +1,5 @@
 ﻿#define MyAppName "BiliDownloader"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "BiliDownloader"
 #define MyAppExeName "BiliDownloader.exe"
 

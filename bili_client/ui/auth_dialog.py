@@ -112,7 +112,7 @@ class QrLoginDialog(ctk.CTkToplevel):
 
             deadline = time.monotonic() + self.EXPIRE_SECONDS
             while not self._closed and time.monotonic() < deadline:
-                result = self.auth_service.poll_qr_login(qr_info.qrcode_key)
+                result = self.auth_service.poll_qr_login(qr_info.qrcode_key, save=False)
                 if result.code == 0 and result.session is not None:
                     self._post_ui(lambda session=result.session: self._finish_success(session))
                     return
@@ -156,7 +156,10 @@ class QrLoginDialog(ctk.CTkToplevel):
         self.status_label.configure(text=text, text_color=color)
 
     def _finish_success(self, session: AuthSession) -> None:
+        if self._closed:
+            return
         self.status_label.configure(text="登录成功，正在保存", text_color=PALETTE["success"])
+        self.auth_service.save_session(session)
         self.on_success(session)
         self._close()
 

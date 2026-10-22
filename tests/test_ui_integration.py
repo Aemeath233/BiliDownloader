@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -260,3 +261,116 @@ class UiIntegrationTests(unittest.TestCase):
         self.assertNotEqual(old_token, page._quality_request_token)
         self.assertEqual("disabled", page.quality_combo.cget("state"))
         reload_options.assert_called_once_with(0)
+
+    def test_saving_preferences_after_refresh_keeps_latest_session(self) -> None:
+        self.pump()
+        self.app.current_config.sessdata = "old-test-session"
+        self.app.show_page("settings")
+        self.pump()
+        page = self.app.pages["settings"]
+        page.speed_limit_entry.delete(0, "end")
+        page.speed_limit_entry.insert(0, "3")
+        self.app._accept_refreshed_session("new-test-session")
+        page._save_settings()
+        self.assertEqual("new-test-session", self.app.current_config.sessdata)
+        self.assertEqual(3, self.app.current_config.speed_limit_mb)
+
+    def test_account_refresh_preserves_an_explicit_manual_account_edit(self) -> None:
+        self.pump()
+        self.app.show_page("settings")
+        self.pump()
+        page = self.app.pages["settings"]
+        page.sessdata_entry.insert(0, "manual-test-session")
+        self.app._accept_refreshed_session("refreshed-test-session")
+        self.assertEqual("manual-test-session", page.sessdata_entry.get())
+        page._save_settings()
+        self.assertEqual("manual-test-session", self.app.current_config.sessdata)
+
+    def test_qr_account_sync_does_not_submit_unsaved_preferences(self) -> None:
+        from bili_client.services.auth_service import AuthSession
+
+        self.pump()
+        self.app.show_page("settings")
+        self.pump()
+        page = self.app.pages["settings"]
+        page.speed_limit_entry.delete(0, "end")
+        page.speed_limit_entry.insert(0, "6")
+        page._on_auth_success(AuthSession(cookies={"SESSDATA": "qr-test-session"}))
+        self.assertEqual(0, self.app.current_config.speed_limit_mb)
+        self.assertEqual("6", page.speed_limit_entry.get())
+        self.assertTrue(page.has_unsaved_changes())
+        self.assertEqual("qr-test-session", self.app.current_config.sessdata)
+
+    def test_shutdown_error_is_reported_and_window_still_exits(self) -> None:
+        self.manager.shutdown.side_effect = OSError("simulated disk full")
+        with (
+            patch.object(self.app, "destroy") as destroy,
+            patch("bili_client.ui.main_window.messagebox.showwarning") as warn,
+        ):
+            self.app._on_close()
+            self.pump()
+            destroy.assert_called_once()
+            warn.assert_called_once()
+
+    def test_rapid_quality_switch_has_one_inflight_and_only_latest_pending(self) -> None:
+        self.pump()
+        page = self.app.add_task_page
+        media = MediaParseResult(
+            "",
+            "",
+            "demo",
+            [EpisodeInfo("first", "BV1xx411c7mD", 1, False), EpisodeInfo("last", "BV1xx411c7mD", 2, False)],
+        )
+        page.current_media = media
+        page._populate_episode_selector(media)
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+
+        def load(episode):
+            calls.append(episode.cid)
+            if episode.cid == 1:
+                entered.set()
+                release.wait(3)
+            return [QualityOption(80 if episode.cid == 1 else 64, "1080P" if episode.cid == 1 else "720P")]
+
+        page._load_quality_options = load
+        try:
+            page._load_qualities_for_episode(0)
+            self.pump(0.18)
+            self.assertTrue(entered.is_set())
+            for index in range(30):
+                page._load_qualities_for_episode(index % 2)
+            self.pump(0.18)
+            self.assertEqual([1], calls)
+        finally:
+            release.set()
+        self.pump(0.2)
+        self.assertEqual([1, 2], calls)
+        self.assertEqual("720P", page.quality_combo.get())
+
+    def test_manual_quality_refresh_bypasses_cached_options(self) -> None:
+        self.pump()
+        page = self.app.add_task_page
+        page.current_media = MediaParseResult("", "", "demo", [EpisodeInfo("demo", "BV1xx411c7mD", 1, False)])
+        page._populate_episode_selector(page.current_media)
+        page.quality_cache[0] = [QualityOption(80, "1080P")]
+        page._load_quality_options = lambda _episode: [QualityOption(64, "720P")]
+        page._refresh_qualities()
+        self.pump(0.2)
+        self.assertEqual("720P", page.quality_combo.get())
+        self.app.api.clear_stream_cache.assert_called_once()
+
+    def test_queue_selection_survives_paging_and_batch_uses_selected_ids(self) -> None:
+        self.pump()
+        self.app.show_page("queue")
+        self.pump()
+        page = self.app.pages["queue"]
+        self.wait_for_cards(page, page.PAGE_SIZE)
+        page._selection_action("select")
+        selected = set(page._visible_task_ids)
+        page._change_page(1)
+        self.wait_for_cards(page, page.PAGE_SIZE)
+        self.assertEqual(selected, page._selected_ids)
+        page.on_batch_action = Mock()
+        page._selection_action("remove")
+        page.on_batch_action.assert_called_once_with("remove", selected)

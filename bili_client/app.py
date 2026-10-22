@@ -38,7 +38,13 @@ def main(started_at: float | None = None) -> None:
         log_store = LogStore(config_store.logs_dir)
 
         def emit_log(message: str) -> None:
-            log_queue.put(log_store.emit(message))
+            try:
+                line = log_store.emit(message)
+            except OSError:
+                from bili_client.core.security import redact_sensitive
+
+                line = redact_sensitive(f"[日志文件写入失败] {message}")
+            log_queue.put(line)
 
         config = config_store.load()
         had_legacy_config_sessdata = bool(config.sessdata)

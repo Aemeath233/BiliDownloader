@@ -71,11 +71,17 @@ class AddTaskPage(ctk.CTkFrame):
         self.episode_page_size = 10
         self.current_episode_page = 0
         self.quality_cache: dict[int, list[QualityOption]] = {}
+        self._quality_cache_times: dict[int, float] = {}
+        self._quality_epoch = 0
+        self._quality_after_id = None
+        self._quality_inflight = None
+        self._quality_pending = None
         self.active_episode_index: int | None = None
         self._quality_request_token = 0
         self._parse_request_token = 0
         self._is_parsing = False
         self._is_adding = False
+        self._retry_save_dir = None
         self._last_auto_parse_url = ""
         self._auto_parse_after_id = None
         self.preferred_quality_label: str | None = None
@@ -91,17 +97,24 @@ class AddTaskPage(ctk.CTkFrame):
         self.pagination_info_var = ctk.StringVar(value="")
         self.filename_preview_var = ctk.StringVar(value="文件名：等待解析")
 
-        self.grid_columnconfigure(0, weight=4, uniform="add_task_columns")
-        self.grid_columnconfigure(1, weight=5, uniform="add_task_columns")
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self.body = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0)
+        self.body.grid(row=0, column=0, sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=4, uniform="add_task_columns")
+        self.body.grid_columnconfigure(1, weight=5, uniform="add_task_columns")
+        self.body.grid_rowconfigure(0, weight=1)
+        self._stacked = None
 
         self._build_input_panel()
         self._build_selection_panel()
+        self.body._parent_canvas.bind("<Configure>", self._adapt_layout, add="+")
+        self.body.bind("<Configure>", self._fit_scroll_height, add="+")
         self._bind_shortcuts()
         self._refresh_add_button_state()
 
     def _build_input_panel(self) -> None:
-        panel = ctk.CTkFrame(self, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
+        panel = self.input_panel = ctk.CTkFrame(self.body, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
         panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(4, weight=1)
@@ -237,7 +250,7 @@ class AddTaskPage(ctk.CTkFrame):
         wrap_to_panel(panel, [self.media_title_label, self.media_info_label, self.config_summary_label])
 
     def _build_selection_panel(self) -> None:
-        panel = ctk.CTkFrame(self, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
+        panel = self.selection_panel = ctk.CTkFrame(self.body, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
         panel.grid(row=0, column=1, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(4, weight=1)
@@ -319,6 +332,16 @@ class AddTaskPage(ctk.CTkFrame):
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         ).grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
 
+        self.refresh_quality_button = MotionButton(
+            quality_panel,
+            text="刷新画质",
+            width=80,
+            height=28,
+            command=self._refresh_qualities,
+            **button_style("secondary"),
+        )
+        self.refresh_quality_button.grid(row=0, column=1, sticky="e", padx=14, pady=(8, 6))
+
         self.quality_combo = ctk.CTkOptionMenu(
             quality_panel,
             values=["等待画质"],
@@ -335,7 +358,7 @@ class AddTaskPage(ctk.CTkFrame):
             text_color=PALETTE["text"],
             anchor="w",
         )
-        self.quality_combo.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+        self.quality_combo.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 12))
         self.quality_combo.set("等待画质")
 
         self.quality_access_label = TextLabel(
@@ -347,7 +370,7 @@ class AddTaskPage(ctk.CTkFrame):
             text_color=PALETTE["accent"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
         )
-        self.quality_access_label.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 10))
+        self.quality_access_label.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 10))
 
         TextLabel(
             quality_panel,
@@ -357,7 +380,7 @@ class AddTaskPage(ctk.CTkFrame):
             wraplength=540,
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-        ).grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 12))
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 12))
 
         self.add_button = MotionButton(
             quality_panel,
@@ -369,13 +392,29 @@ class AddTaskPage(ctk.CTkFrame):
             corner_radius=CARD_RADIUS,
             font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
         )
-        self.add_button.grid(row=4, column=0, sticky="ew", padx=14, pady=(0, 14))
+        self.add_button.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
         wrap_to_panel(quality_panel, [self.quality_access_label], padding=28)
 
     def _bind_shortcuts(self) -> None:
         self.url_input.bind("<Control-Return>", self._submit_parse_shortcut)
         self.url_input.bind("<<Paste>>", self._schedule_auto_parse)
         self.url_input.bind("<Control-v>", self._schedule_auto_parse)
+
+    def _adapt_layout(self, event) -> None:
+        stacked = self._reverse_widget_scaling(event.width) < 760
+        if stacked != self._stacked:
+            self._stacked = stacked
+            self.body.grid_columnconfigure(0, weight=1 if stacked else 4, uniform="" if stacked else "add_task_columns")
+            self.body.grid_columnconfigure(1, weight=0 if stacked else 5, uniform="" if stacked else "add_task_columns")
+            self.input_panel.grid_configure(padx=0 if stacked else (0, 12), pady=(0, 12) if stacked else 0)
+            self.selection_panel.grid_configure(row=1 if stacked else 0, column=0 if stacked else 1)
+        self._fit_scroll_height()
+
+    def _fit_scroll_height(self, _event=None) -> None:
+        canvas = self.body._parent_canvas
+        canvas.itemconfigure(
+            self.body._create_window_id, height=max(self.body.winfo_reqheight(), canvas.winfo_height())
+        )
 
     def _submit_parse_shortcut(self, _event=None):
         self._parse_current_url()
@@ -400,12 +439,14 @@ class AddTaskPage(ctk.CTkFrame):
         self._parse_current_url()
 
     def _clear_input(self) -> None:
+        self._retry_save_dir = None
         self._last_auto_parse_url = ""
         self.url_input.delete("1.0", "end")
         self._quality_request_token = time.time_ns()
         self.current_media = None
         self.current_qualities = []
         self.quality_cache.clear()
+        self._quality_cache_times.clear()
         self.preferred_quality_label = None
         self._set_parse_state("idle", "等待链接", "尚未解析", "解析完成后会显示视频信息")
         self._reset_episode_selector("解析完成后会显示可下载分集")
@@ -433,6 +474,7 @@ class AddTaskPage(ctk.CTkFrame):
         if scope != self._quality_auth_scope:
             self._quality_auth_scope = scope
             self.quality_cache.clear()
+            self._quality_cache_times.clear()
             self.preferred_quality_label = None
             self._set_quality_waiting_state("正在更新账号可下载画质")
             if self.current_media is not None and self.active_episode_index is not None:
@@ -475,6 +517,7 @@ class AddTaskPage(ctk.CTkFrame):
     def _populate_episode_selector(self, media: MediaParseResult) -> None:
         self._reset_episode_selector("请选择要加入队列的分集")
         self.quality_cache.clear()
+        self._quality_cache_times.clear()
 
         for index, _episode in enumerate(media.episodes):
             variable = EpisodeSelection(selected=index == media.default_episode_index)
@@ -783,6 +826,8 @@ class AddTaskPage(ctk.CTkFrame):
         )
 
     def _target_save_dir(self, config: AppConfig) -> Path:
+        if self._retry_save_dir is not None:
+            return Path(self._retry_save_dir)
         save_dir = Path(config.save_path)
         if config.organize_by_source and self.current_media is not None:
             folder = self.current_media.folder_title or self.current_media.source_name or self.current_media.title
@@ -859,6 +904,7 @@ class AddTaskPage(ctk.CTkFrame):
     def _parse_current_url(self) -> None:
         if self._is_parsing:
             return
+        self._retry_save_dir = None
 
         content = self.url_input.get("1.0", "end").strip()
         if not content:
@@ -965,6 +1011,8 @@ class AddTaskPage(ctk.CTkFrame):
         self._update_episode_selection_summary()
 
         cached = self.quality_cache.get(episode_index)
+        if time.monotonic() - self._quality_cache_times.get(episode_index, time.monotonic()) > 45:
+            cached = None
         if cached:
             self.current_qualities = cached
             labels = [quality.label for quality in cached]
@@ -972,15 +1020,65 @@ class AddTaskPage(ctk.CTkFrame):
             self._refresh_add_button_state()
             return
 
-        episode = self.current_media.episodes[episode_index]
         self._set_quality_waiting_state("正在读取画质")
-        token = self._quality_request_token
+        self._quality_pending = self._quality_key(episode_index)
+        if self._quality_after_id is not None:
+            self.after_cancel(self._quality_after_id)
+        self._quality_after_id = self.after(120, self._start_quality_work)
+
+    def _quality_key(self, index: int) -> tuple:
+        return id(self.current_media), self._quality_auth_scope, self._quality_epoch, index
+
+    def _refresh_qualities(self) -> None:
+        index = self.active_episode_index
+        if self.current_media is None or index is None:
+            notify(self, "请先解析链接并选择分集", "warning")
+            return
+        self._quality_epoch += 1
+        self.quality_cache.pop(index, None)
+        self.api.clear_stream_cache(self.current_media.episodes[index], self.get_config().sessdata)
+        self._load_qualities_for_episode(index)
+
+    def _start_quality_work(self) -> None:
+        self._quality_after_id = None
+        if self._quality_inflight is not None or self._quality_pending is None:
+            return
+        key = self._quality_pending
+        self._quality_pending = None
+        index = key[-1]
+        if self.current_media is None or self.active_episode_index != index or key != self._quality_key(index):
+            return
+        cached = self.quality_cache.get(index)
+        if cached and time.monotonic() - self._quality_cache_times.get(index, 0) < 45:
+            self._on_quality_success(self._quality_request_token, cached)
+            return
+        self._quality_inflight = key
+        episode = self.current_media.episodes[index]
         self.ui_tasks.run(
             "load-qualities",
             lambda: self._load_quality_options(episode),
-            on_success=lambda qualities, token=token: self._on_quality_success(token, qualities),
-            on_error=lambda exc, token=token: self._on_quality_failure(token, str(exc)),
+            on_success=lambda qualities: self._quality_work_result(key, qualities),
+            on_error=lambda exc: self._quality_work_error(key, str(exc)),
+            on_finally=self._finish_quality_work,
         )
+
+    def _quality_work_result(self, key: tuple, qualities: list[QualityOption]) -> None:
+        index = key[-1]
+        if self.current_media is None or key != self._quality_key(index):
+            return
+        self.quality_cache[index] = qualities
+        self._quality_cache_times[index] = time.monotonic()
+        if self.active_episode_index == index:
+            self._on_quality_success(self._quality_request_token, qualities)
+
+    def _quality_work_error(self, key: tuple, message: str) -> None:
+        if self.active_episode_index is not None and key == self._quality_key(self.active_episode_index):
+            self._on_quality_failure(self._quality_request_token, message)
+
+    def _finish_quality_work(self) -> None:
+        self._quality_inflight = None
+        if self._quality_after_id is None and self._quality_pending is not None:
+            self._quality_after_id = self.after(0, self._start_quality_work)
 
     def _load_quality_options(self, episode) -> list[QualityOption]:
         sessdata = self.refresh_auth_session().strip()
@@ -1033,6 +1131,17 @@ class AddTaskPage(ctk.CTkFrame):
             )
             for episode_index in selected_indices
         ]
+        duplicates = self.manager.count_duplicates([episode for episode, _ in requests], quality.qn)
+        if (
+            isinstance(duplicates, int)
+            and duplicates > 0
+            and not messagebox.askyesno(
+                "发现重复任务",
+                f"已有 {duplicates} 个相同分集、相同画质的进行中或已完成任务。\n仍要再下载一份吗？",
+                parent=self,
+            )
+        ):
+            return
 
         self._is_adding = True
         self._refresh_add_button_state()
@@ -1068,3 +1177,20 @@ class AddTaskPage(ctk.CTkFrame):
     def _finish_add_tasks(self) -> None:
         self._is_adding = False
         self._refresh_add_button_state()
+
+    def prepare_retry(self, spec: DownloadTaskSpec) -> None:
+        if self._is_parsing:
+            self._parse_request_token = time.time_ns()
+            self._is_parsing = False
+            self._set_parse_busy(False)
+        self._retry_save_dir = spec.save_dir
+        self.url_input.delete("1.0", "end")
+        self.url_input.insert("1.0", spec.source_url)
+        self.current_media = MediaParseResult(spec.source_url, spec.source_url, spec.episode.title, [spec.episode])
+        self._set_parse_state(
+            "success", "重新选择画质", spec.episode.title, "原任务记录保留；选择新画质后重新下载，不会自动降档"
+        )
+        self._populate_episode_selector(self.current_media)
+        self.preferred_quality_label = spec.quality.label
+        self.api.clear_stream_cache(spec.episode, self.get_config().sessdata)
+        self._load_qualities_for_episode(0)

@@ -193,6 +193,14 @@ class BilibiliApi:
             note += f"\n当前不可获取：{'、'.join(restricted)}（受登录、会员或视频权限影响）。"
         return [QualityOption(qn=qn, label=labels.get(qn, f"QN {qn}"), availability_note=note) for qn in verified]
 
+    def clear_stream_cache(self, episode: EpisodeInfo, sessdata: str = "") -> None:
+        scope = self._auth_cache_scope(sessdata)
+        identity = f"bvid={episode.bvid}&cid={episode.cid}&"
+        with self._cache_lock:
+            for key in list(self._json_cache):
+                if key[0] == scope and identity in key[2] and "/playurl?" in key[2]:
+                    del self._json_cache[key]
+
     @staticmethod
     def check_requested_quality(requested_qn: int, actual_qn: int, labels: dict[int, str]) -> None:
         if requested_qn == actual_qn:
