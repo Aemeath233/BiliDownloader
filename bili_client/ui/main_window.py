@@ -78,7 +78,6 @@ class MainWindow(ctk.CTk):
         self._ready = False
         self._page_request_token = 0
         self._displayed_page = None
-        self._displayed_key = None
         self._pending_queue_actions: set[str] = set()
         self._first_frame_at = None
         self.ui_tasks = UiTaskRunner(self)
@@ -100,7 +99,7 @@ class MainWindow(ctk.CTk):
                 pass
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.grid_columnconfigure(0, minsize=238)
+        self.grid_columnconfigure(0, minsize=208)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
@@ -276,7 +275,7 @@ class MainWindow(ctk.CTk):
         if compact == self._compact_layout:
             return
         self._compact_layout = compact
-        self.grid_columnconfigure(0, minsize=180 if compact else 238)
+        self.grid_columnconfigure(0, minsize=180 if compact else 208)
         self.brand_label.configure(text="Bili 下载器" if compact else "BiliDownloader")
         self.shortcut_label.configure(text="Ctrl+1–4 切页" if compact else "Ctrl+F 搜索 · Ctrl+1–4 切页")
         if compact:
@@ -285,12 +284,12 @@ class MainWindow(ctk.CTk):
             self._topbar_stats.grid()
 
     def _build_topbar(self) -> None:
-        topbar = ctk.CTkFrame(self, fg_color=PALETTE["panel_bg"], corner_radius=PANEL_RADIUS)
+        topbar = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         topbar.grid(row=0, column=1, sticky="ew", padx=18, pady=(18, 12))
         topbar.grid_columnconfigure(0, weight=1)
 
         copy = ctk.CTkFrame(topbar, fg_color="transparent")
-        copy.grid(row=0, column=0, sticky="ew", padx=18, pady=14)
+        copy.grid(row=0, column=0, sticky="ew", padx=2, pady=8)
         copy.grid_columnconfigure(0, weight=1)
 
         self.page_title_var = ctk.StringVar(value=self.PAGE_COPY["parse"][0])
@@ -300,7 +299,7 @@ class MainWindow(ctk.CTk):
             textvariable=self.page_title_var,
             anchor="w",
             text_color=PALETTE["text"],
-            font=ctk.CTkFont(family=FONT_FAMILY, size=24, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=22, weight="bold"),
         ).grid(row=0, column=0, sticky="ew")
         TextLabel(
             copy,
@@ -328,7 +327,7 @@ class MainWindow(ctk.CTk):
 
     def _build_stat_tile(self, master, column: int, label: str, variable: ctk.StringVar) -> None:
         value_width = 116 if column == 0 else 34
-        card = ctk.CTkFrame(master, fg_color=PALETTE["surface"], corner_radius=CARD_RADIUS)
+        card = ctk.CTkFrame(master, fg_color="transparent", corner_radius=0)
         card.grid(row=0, column=column, padx=4)
         TextLabel(
             card, text=label, width=value_width, anchor="w", text_color=PALETTE["muted"], font=ctk.CTkFont(size=11)
@@ -339,7 +338,7 @@ class MainWindow(ctk.CTk):
             width=value_width,
             anchor="w",
             text_color=PALETTE["text"],
-            font=ctk.CTkFont(family=FONT_FAMILY, size=18, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
         )
         value_label.pack(anchor="w", padx=12, pady=(0, 8))
         self._dashboard_labels[str(variable)] = value_label
@@ -454,10 +453,8 @@ class MainWindow(ctk.CTk):
 
         self._sync_nav_buttons()
         if target not in self.pages:
-            self.loading_label.configure(text="正在准备页面…", text_color=PALETTE["muted"])
-            self.loading_panel.place(relwidth=1, relheight=1)
-            self.loading_panel.lift()
-            self.loading_progress.start()
+            # Keep the current page visible until the new frame is ready.
+            # A full-screen spinner here flashes for local widget construction.
             self.after(20, lambda: self._present_page(target, token))
         else:
             self._present_page(target, token)
@@ -466,9 +463,7 @@ class MainWindow(ctk.CTk):
         if self._closing or token != self._page_request_token:
             return
         page = self._ensure_page(target)
-        self.motion.cancel("page")
         previous = self._displayed_page
-        previous_key = self._displayed_key
         for existing in self.pages.values():
             if existing is not page and existing is not previous:
                 existing.place_forget()
@@ -480,29 +475,14 @@ class MainWindow(ctk.CTk):
         self.loading_progress.stop()
         self.loading_panel.place_forget()
         self._displayed_page = page
-        self._displayed_key = target
         page.place(x=0, y=0, relwidth=1, relheight=1)
         page.lift()
         self.toast.lift()
 
-        def finish() -> None:
-            if previous is not None and previous is not page:
-                previous.place_forget()
-
-        # Move a fully sized frame; never resize/rebuild its children per frame.
-        direction = (
-            1
-            if previous_key is None or tuple(self.PAGE_COPY).index(target) >= tuple(self.PAGE_COPY).index(previous_key)
-            else -1
-        )
-        self.motion.tween(
-            "page",
-            18 * direction if previous is not None else 0,
-            0,
-            lambda offset: page.place(x=round(offset), y=0, relwidth=1, relheight=1),
-            180,
-            finish,
-        )
+        # Native Tk child windows cannot be composited like a browser layer.
+        # Present at the final position; motion stays on the small nav indicator.
+        if previous is not None and previous is not page:
+            previous.place_forget()
 
     def _sync_nav_buttons(self) -> None:
         if self._active_nav_key == self.current_page:

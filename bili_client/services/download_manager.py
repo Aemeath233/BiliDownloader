@@ -13,6 +13,7 @@ from pathlib import Path
 from bili_client.core.errors import humanize_error
 from bili_client.core.models import (
     AppConfig,
+    DownloadMode,
     DownloadTask,
     EpisodeInfo,
     ProgressSnapshot,
@@ -43,6 +44,7 @@ class DownloadTaskSpec:
     save_dir: str
     sessdata: str = ""
     filename_stem: str | None = None
+    download_mode: DownloadMode = DownloadMode.COMBINED
 
 
 class DownloadManager:
@@ -114,6 +116,7 @@ class DownloadManager:
         save_dir: str,
         sessdata: str,
         filename_stem: str | None = None,
+        download_mode: DownloadMode = DownloadMode.COMBINED,
     ) -> str:
         return self.create_tasks(
             [
@@ -124,6 +127,7 @@ class DownloadManager:
                     save_dir=save_dir,
                     sessdata=sessdata,
                     filename_stem=filename_stem,
+                    download_mode=DownloadMode(download_mode),
                 )
             ]
         )[0]
@@ -134,6 +138,7 @@ class DownloadManager:
 
         prepared: list[tuple[DownloadTaskSpec, Path, str]] = []
         for spec in specs:
+            DownloadMode(spec.download_mode)
             save_path = Path(spec.save_dir)
             save_path.mkdir(parents=True, exist_ok=True)
             output_stem = safe_filename(spec.filename_stem or spec.episode.title)
@@ -150,7 +155,7 @@ class DownloadManager:
                 for spec, save_path, output_stem in prepared:
                     task_id = uuid.uuid4().hex
                     output_path = self._next_available_path(
-                        save_path / f"{output_stem}.mp4",
+                        save_path / f"{output_stem}{DownloadMode(spec.download_mode).extension}",
                         reserved_paths=reserved_paths,
                     )
                     reserved_paths.add(self._path_key(output_path))
@@ -163,6 +168,7 @@ class DownloadManager:
                         episode=spec.episode,
                         quality=spec.quality,
                         title=spec.episode.title,
+                        download_mode=DownloadMode(spec.download_mode),
                     )
                     self._tasks[task_id] = task
                     self._queue.append(task_id)
@@ -230,6 +236,7 @@ class DownloadManager:
                     save_dir=task.save_dir,
                     sessdata=task.sessdata,
                     filename_stem=Path(task.output_path).stem,
+                    download_mode=task.download_mode,
                 )
                 for task in self._tasks.values()
                 if task.status in retry_statuses and (task_ids is None or task.task_id in task_ids)
@@ -241,11 +248,14 @@ class DownloadManager:
             self.logger(f"已重新加入 {len(created_ids)} 个失败/取消任务")
         return len(created_ids)
 
-    def count_duplicates(self, episodes: list[EpisodeInfo], qn: int) -> int:
+    def count_duplicates(
+        self, episodes: list[EpisodeInfo], qn: int, download_mode: DownloadMode = DownloadMode.COMBINED
+    ) -> int:
         identities = {(episode.bvid, episode.cid, episode.is_bangumi) for episode in episodes}
         with self._tasks_lock:
             return sum(
                 task.quality.qn == qn
+                and task.download_mode == download_mode
                 and task.status not in RETRYABLE_STATUSES
                 and (task.episode.bvid, task.episode.cid, task.episode.is_bangumi) in identities
                 for task in self._tasks.values()
@@ -256,7 +266,14 @@ class DownloadManager:
             task = self._tasks.get(task_id)
             if task is None or task.status not in RETRYABLE_STATUSES:
                 return None
-            return DownloadTaskSpec(task.source_url, task.episode, task.quality, task.save_dir, task.sessdata)
+            return DownloadTaskSpec(
+                task.source_url,
+                task.episode,
+                task.quality,
+                task.save_dir,
+                task.sessdata,
+                download_mode=task.download_mode,
+            )
 
     def retry_task(self, task_id: str) -> str | None:
         with self._tasks_lock:
@@ -271,9 +288,10 @@ class DownloadManager:
                 task.sessdata,
                 task.title,
                 Path(task.output_path).stem,
+                task.download_mode,
             )
 
-        source_url, episode, quality, save_dir, sessdata, title, filename_stem = spec
+        source_url, episode, quality, save_dir, sessdata, title, filename_stem, download_mode = spec
         new_task_id = self.create_task(
             source_url=source_url,
             episode=episode,
@@ -281,6 +299,7 @@ class DownloadManager:
             save_dir=save_dir,
             sessdata=sessdata,
             filename_stem=filename_stem,
+            download_mode=download_mode,
         )
         self.logger(f"已重新加入任务：{title}")
         return new_task_id
@@ -426,6 +445,7 @@ class DownloadManager:
 
     def _task_to_payload(self, task: DownloadTask) -> dict:
         return {
+            "download_mode": task.download_mode.value,
             "task_id": task.task_id,
             "source_url": task.source_url,
             "output_path": task.output_path,
@@ -465,7 +485,8 @@ class DownloadManager:
                 return None
             title = str(payload.get("title") or "未命名任务")
             save_dir = str(payload.get("save_dir") or Path.cwd())
-            output_path = str(payload.get("output_path") or Path(save_dir) / f"{title}.mp4")
+            download_mode = DownloadMode(payload.get("download_mode", "combined"))
+            output_path = str(payload.get("output_path") or Path(save_dir) / f"{title}{download_mode.extension}")
 
             episode_payload = payload.get("episode") if isinstance(payload.get("episode"), dict) else {}
             quality_payload = payload.get("quality") if isinstance(payload.get("quality"), dict) else {}
@@ -524,6 +545,7 @@ class DownloadManager:
                 started_at=started_at,
                 finished_at=finished_at,
                 progress=progress,
+                download_mode=download_mode,
             )
         except (TypeError, ValueError, OverflowError):
             return None
@@ -586,19 +608,23 @@ class DownloadManager:
             self._set_status(task_id, TaskStatus.PREPARING, "解析流地址")
             video_stream, audio_stream, sessdata = self._get_streams_for_task(task_id, task)
             self._ensure_not_cancelled(cancel_event)
-            self._set_totals(task_id, video_stream.size_bytes, audio_stream.size_bytes if audio_stream else 0)
+            self._set_totals(
+                task_id, video_stream.size_bytes if video_stream else 0, audio_stream.size_bytes if audio_stream else 0
+            )
 
             self._set_status(task_id, TaskStatus.DOWNLOADING, "下载中")
 
             errors: list[str] = []
             stop_event = threading.Event()
 
-            video_worker = threading.Thread(
-                target=self._download_stream,
-                args=(task_id, video_stream, sessdata, video_path, errors, cancel_event, stop_event),
-                daemon=True,
-            )
-            video_worker.start()
+            video_worker = None
+            if video_stream is not None:
+                video_worker = threading.Thread(
+                    target=self._download_stream,
+                    args=(task_id, video_stream, sessdata, video_path, errors, cancel_event, stop_event),
+                    daemon=True,
+                )
+                video_worker.start()
 
             audio_worker = None
             if audio_stream is not None:
@@ -609,7 +635,8 @@ class DownloadManager:
                 )
                 audio_worker.start()
 
-            video_worker.join()
+            if video_worker is not None:
+                video_worker.join()
             if audio_worker is not None:
                 audio_worker.join()
 
@@ -617,13 +644,27 @@ class DownloadManager:
                 raise RuntimeError("; ".join(errors))
             self._ensure_not_cancelled(cancel_event)
 
-            self._set_status(task_id, TaskStatus.MERGING, "FFmpeg 合并中")
-            published_path = self.ffmpeg.merge(
-                video_path=video_path,
-                audio_path=audio_path if audio_stream else None,
-                output_path=Path(task.output_path),
-                cancel_event=cancel_event,
-            )
+            if task.download_mode == DownloadMode.COMBINED:
+                self._set_status(task_id, TaskStatus.MERGING, "FFmpeg 合并中")
+                published_path = self.ffmpeg.merge(
+                    video_path=video_path,
+                    audio_path=audio_path if audio_stream else None,
+                    output_path=Path(task.output_path),
+                    cancel_event=cancel_event,
+                )
+            else:
+                self._set_status(
+                    task_id,
+                    TaskStatus.MERGING,
+                    "保存音频中" if task.download_mode == DownloadMode.AUDIO else "保存无声视频中",
+                )
+                published_path = self.ffmpeg.merge(
+                    video_path=audio_path if task.download_mode == DownloadMode.AUDIO else video_path,
+                    audio_path=None,
+                    output_path=Path(task.output_path),
+                    cancel_event=cancel_event,
+                    track=task.download_mode.value,
+                )
             self._ensure_not_cancelled(cancel_event)
 
             with self._tasks_lock:
@@ -664,11 +705,19 @@ class DownloadManager:
         self,
         task_id: str,
         task: DownloadTask,
-    ) -> tuple[StreamInfo, StreamInfo | None, str]:
+    ) -> tuple[StreamInfo | None, StreamInfo | None, str]:
+        def fetch(sessdata):
+            if task.download_mode == DownloadMode.AUDIO:
+                return None, self.api.get_audio_stream(task.episode, task.quality.qn, sessdata)
+            if task.download_mode == DownloadMode.VIDEO:
+                return self.api.get_streams(task.episode, task.quality.qn, sessdata, include_audio=False)
+            return self.api.get_streams(task.episode, task.quality.qn, sessdata)
+
         sessdata = self._refresh_task_sessdata(task_id, task, force=False)
         try:
-            video_stream, audio_stream = self.api.get_streams(task.episode, task.quality.qn, sessdata)
-            self._apply_actual_quality(task_id, task, video_stream)
+            video_stream, audio_stream = fetch(sessdata)
+            if video_stream is not None:
+                self._apply_actual_quality(task_id, task, video_stream)
             return video_stream, audio_stream, sessdata
         except BiliApiError:
             if task.quality.qn < 80 or self.auth_refresher is None:
@@ -678,9 +727,10 @@ class DownloadManager:
             if not refreshed_sessdata or refreshed_sessdata == sessdata:
                 raise
 
-            self.logger(f"高画质取流失败，已刷新登录态后重试一次：{task.title}")
-            video_stream, audio_stream = self.api.get_streams(task.episode, task.quality.qn, refreshed_sessdata)
-            self._apply_actual_quality(task_id, task, video_stream)
+            self.logger(f"取流失败，已刷新登录态后重试一次：{task.title}")
+            video_stream, audio_stream = fetch(refreshed_sessdata)
+            if video_stream is not None:
+                self._apply_actual_quality(task_id, task, video_stream)
             return video_stream, audio_stream, refreshed_sessdata
 
     def _apply_actual_quality(self, task_id: str, task: DownloadTask, video_stream: StreamInfo) -> None:
@@ -883,6 +933,8 @@ class DownloadManager:
         can_retry = task.status in RETRYABLE_STATUSES
         can_remove = task.status in TERMINAL_STATUSES or task.status == TaskStatus.QUEUED
         return {
+            "download_mode": task.download_mode.value,
+            "download_mode_label": task.download_mode.label,
             "task_id": task.task_id,
             "title": task.title,
             "status": task.status.value,

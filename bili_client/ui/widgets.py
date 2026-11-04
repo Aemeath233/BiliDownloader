@@ -55,9 +55,13 @@ class MotionButton(ctk.CTkButton):
     def _transition(self, duration_ms: int = 120) -> None:
         start = self._display_color or self._base_color()
         end = self._target_color()
-        motion_for(self).tween(
-            ("button", self), 0, 1, lambda value: self._paint_color(mix_color(start, end, value)), duration_ms
-        )
+        motion = motion_for(self)
+        # Construction and hidden-page updates need no intermediate frames.
+        if start == end or not self.winfo_viewable():
+            motion.cancel(("button", self))
+            self._paint_color(end)
+            return
+        motion.tween(("button", self), 0, 1, lambda value: self._paint_color(mix_color(start, end, value)), duration_ms)
 
     def _on_enter(self, event=None) -> None:
         self._hovered = True
@@ -77,6 +81,8 @@ class MotionButton(ctk.CTkButton):
 
     def configure(self, require_redraw=False, **kwargs) -> None:
         color_changed = any(key in kwargs for key in ("state", "fg_color", "hover_color", "bg_color"))
+        if color_changed and self._display_color is None and hasattr(self, "_fg_color"):
+            self._display_color = self._base_color()
         super().configure(require_redraw=require_redraw, **kwargs)
         if color_changed and hasattr(self, "_canvas"):
             self._transition()

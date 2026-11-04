@@ -1,0 +1,17 @@
+{
+  "version": "2.1.2",
+  "icon_frames": 7,
+  "executables": {
+    "dist/installer/app/BiliDownloader/BiliDownloader.exe": {
+      "new_icon_frames_verified": 7,
+      "bytes": 7066263,
+      "sha256": "cafdb6ccfcce00d354e6236d8c571d6ac0a230e6be769aa1e3ba93a3ccc86751"
+    },
+    "dist/installer/BiliDownloader-Setup.exe": {
+      "new_icon_frames_verified": 7,
+      "bytes": 22249411,
+      "sha256": "2c4b473e2c274f03d110d7521786ef5e201d5caf0853f313067f21c89092ac5d"
+    }
+  },
+  "packaged_assets_match": true
+}

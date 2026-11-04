@@ -37,4 +37,8 @@ video/
 
 # Bundled third-party binaries and downloaded archives
 vendor/ffmpeg/
+vendor/ffmpeg-minimal/
+vendor/webview2/
+vendor/webview2-bootstrapper/
+vendor/*.cab
 ffmpeg-master-*.zip

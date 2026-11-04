@@ -1,6 +1,6 @@
 [project]
 name = "bili-downloader"
-version = "1.2.0"
+version = "2.2.0"
 description = "Windows Bilibili downloader with a responsive desktop interface"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,9 @@ dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.packages.find]
 include = ["bili_client*"]
+
+[tool.setuptools.package-data]
+"bili_client.desktop" = ["assets/*.html", "assets/*.css", "assets/*.js", "assets/*.png"]
 
 [tool.ruff]
 target-version = "py311"

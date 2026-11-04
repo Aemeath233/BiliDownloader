@@ -38,6 +38,20 @@ class TaskStatus(StrEnum):
     CANCELED = "canceled"
 
 
+class DownloadMode(StrEnum):
+    COMBINED = "combined"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+    @property
+    def extension(self) -> str:
+        return ".m4a" if self == self.AUDIO else ".mp4"
+
+    @property
+    def label(self) -> str:
+        return {self.COMBINED: "视频＋音频", self.AUDIO: "仅音频", self.VIDEO: "仅视频（无声）"}[self]
+
+
 @dataclass(slots=True)
 class AppConfig:
     sessdata: str = ""
@@ -51,6 +65,7 @@ class AppConfig:
     ffmpeg_path: str = "ffmpeg"
     appearance_mode: str = "system"
     animations_enabled: bool = True
+    default_download_mode: str = DownloadMode.COMBINED
 
 
 @dataclass(slots=True)
@@ -122,3 +137,4 @@ class DownloadTask:
     progress: ProgressSnapshot = field(default_factory=ProgressSnapshot)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _speed_samples: deque[tuple[float, int]] = field(default_factory=deque, repr=False)
+    download_mode: DownloadMode = DownloadMode.COMBINED

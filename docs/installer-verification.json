@@ -1,0 +1,46 @@
+{
+  "artifact": "BiliDownloader-Setup.exe",
+  "artifact_bytes": 21607394,
+  "sha256": "29ef544a95bed84d532258cbfe0fc9c5f02c34727a238fdcf72a26fd8ae9081a",
+  "installer": {
+    "setup_size_mib": 20.61,
+    "install_and_shortcuts": "passed",
+    "system_webview2_reused": true,
+    "ready_seconds_three_launches": [
+      1.301,
+      1.161,
+      1.126
+    ],
+    "installed_media_merge": "passed",
+    "upgrade_cleans_old_dependencies_preserves_data": "passed",
+    "installed_size_mib": 50.7,
+    "uninstall_preserves_user_data_removes_program_and_shortcuts": "passed"
+  },
+  "ffmpeg": {
+    "h264+aac": "passed; all packet hashes match",
+    "hevc+aac": "passed; all packet hashes match",
+    "av1+aac": "passed; all packet hashes match",
+    "h264+eac3": "passed; all packet hashes match",
+    "h264+flac": "passed; all packet hashes match",
+    "h264+no-audio": "passed; all packet hashes match",
+    "legacy-flv": "passed; all packet hashes match",
+    "h264+raw-aac": "passed; decoded audio samples match",
+    "h264+raw-eac3": "passed; decoded audio samples match",
+    "h264+raw-flac": "passed; decoded audio samples match"
+  },
+  "unittest_passed": 138,
+  "ruff": "passed",
+  "format_files": 68,
+  "report_scope": "Initial installer regression; later UI package changes recorded in updates",
+  "updates": [
+    {
+      "change": "Queue actions changed to icon buttons with disabled states",
+      "artifact_sha256": "b0ef21d02d94407dd4e1530dcb23689102c3d17132888c2966b4dd30a5143c92",
+      "artifact_bytes": 21608074,
+      "embedded_ui_flow": "14 checks passed",
+      "empty_queue_preview": "light/dark at minimum window passed",
+      "packaged_assets_match_source": true,
+      "installation_regression": "not repeated; existing user installation detected and preserved"
+    }
+  ]
+}

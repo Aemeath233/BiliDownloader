@@ -101,6 +101,40 @@ class UiIntegrationTests(unittest.TestCase):
         self.assertEqual({"999"}, set(page.task_cards))
         self.assertEqual(0, page._current_page)
 
+    def test_first_visit_keeps_previous_page_until_target_is_ready(self) -> None:
+        self.pump()
+        previous = self.app._displayed_page
+        self.app.motion.set_enabled(True)
+        self.app.show_page("settings")
+        self.assertIs(previous, self.app._displayed_page)
+        self.assertEqual("place", previous.winfo_manager())
+        self.assertEqual("", self.app.loading_panel.winfo_manager())
+        self.pump(0.35)
+        self.assertIs(self.app.pages["settings"], self.app._displayed_page)
+        self.assertEqual("", previous.winfo_manager())
+        self.assertEqual(0, int(self.app._displayed_page.place_info()["x"]))
+        self.assertNotIn("page", self.app.motion._tweens)
+
+    def test_hidden_button_changes_do_not_schedule_animation(self) -> None:
+        self.pump()
+        self.app.motion.set_enabled(True)
+        button = self.app.add_task_page.parse_button
+        button.configure(fg_color="#123456")
+        self.assertEqual("#123456", button._display_color)
+        self.assertNotIn(("button", button), self.app.motion._tweens)
+
+    def test_visible_button_only_animates_when_color_changes(self) -> None:
+        self.pump()
+        self.app.motion.set_enabled(True)
+        button = self.app.add_task_page.parse_button
+        with patch.object(button, "winfo_viewable", return_value=True):
+            button.configure(fg_color="#123456")
+            self.assertIn(("button", button), self.app.motion._tweens)
+            self.app.motion.set_enabled(False)
+            self.app.motion.set_enabled(True)
+            button.configure(fg_color="#123456")
+            self.assertNotIn(("button", button), self.app.motion._tweens)
+
     def test_progress_updates_do_not_redraw_unchanged_titles_or_actions(self) -> None:
         self.pump()
         self.app.show_page("queue")

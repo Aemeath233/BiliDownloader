@@ -9,7 +9,7 @@ from build_support import app_data, deduplicate_ffmpeg
 a = Analysis(
     [str(root / 'main.py')], pathex=[str(root)], binaries=[],
     datas=app_data(root, require_ffmpeg=False), hiddenimports=[],
-    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[],
+    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=['tkinter', 'customtkinter', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'cefpython3'],
     noarchive=False, optimize=0,
 )
 a.binaries = deduplicate_ffmpeg(a.binaries, root)

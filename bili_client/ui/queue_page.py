@@ -510,20 +510,20 @@ class QueuePage(ctk.CTkFrame):
         self.next_button.grid(row=0, column=2)
 
     def _build_metric_card(self, master, column: int, label: str, variable: ctk.StringVar) -> None:
-        card = ctk.CTkFrame(master, fg_color=PALETTE["surface"], corner_radius=CARD_RADIUS)
-        card.grid(row=0, column=column, sticky="ew", padx=(12 if column == 0 else 4, 12 if column == 3 else 4), pady=12)
+        card = ctk.CTkFrame(master, fg_color="transparent", corner_radius=0)
+        card.grid(row=0, column=column, sticky="ew", padx=(16 if column == 0 else 8, 16 if column == 3 else 8), pady=10)
         TextLabel(
             card,
             text=label,
             text_color=PALETTE["muted"],
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-        ).pack(anchor="w", padx=14, pady=(10, 3))
+        ).pack(side="left", padx=(0, 10))
         TextLabel(
             card,
             textvariable=variable,
             text_color=PALETTE["text"],
-            font=ctk.CTkFont(family=FONT_FAMILY, size=22, weight="bold"),
-        ).pack(anchor="w", padx=14, pady=(0, 12))
+            font=ctk.CTkFont(family=FONT_FAMILY, size=18, weight="bold"),
+        ).pack(side="left")
 
     def _on_filter_changed(self, _value: str) -> None:
         self._current_page = 0

@@ -71,7 +71,11 @@ class FFmpegService:
         audio_path: Path | None,
         output_path: Path,
         cancel_event: threading.Event | None = None,
+        *,
+        track: str | None = None,
     ) -> Path:
+        if track not in (None, "audio", "video"):
+            raise ValueError("无效的媒体轨道")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = output_path.with_name(
             f".{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix or '.mp4'}"
@@ -79,6 +83,14 @@ class FFmpegService:
         command = [self.ffmpeg_path, "-nostdin", "-i", str(video_path)]
         if audio_path is not None:
             command += ["-i", str(audio_path)]
+        if track is not None:
+            command += [
+                "-map",
+                "0:a:0" if track == "audio" else "0:v:0",
+                "-vn" if track == "audio" else "-an",
+                "-f",
+                "mp4",
+            ]
         command += ["-c", "copy", "-y", "-loglevel", "error", str(temporary_output)]
 
         try:

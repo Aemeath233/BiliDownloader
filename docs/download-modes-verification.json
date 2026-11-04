@@ -1,0 +1,86 @@
+{
+  "version": "2.1.0",
+  "artifact_bytes": 21616994,
+  "sha256": "0bc874a7e05012f3554e5d9cfb7274ff998bad7fc236a0627b213a22ebd4f15e",
+  "unit_tests_passed": 146,
+  "media_checks": {
+    "h264+aac": "passed; all packet hashes match",
+    "hevc+aac": "passed; all packet hashes match",
+    "av1+aac": "passed; all packet hashes match",
+    "h264+eac3": "passed; all packet hashes match",
+    "h264+flac": "passed; all packet hashes match",
+    "h264+no-audio": "passed; all packet hashes match",
+    "legacy-flv": "passed; all packet hashes match",
+    "extract-only-audio": "passed; only selected track remains, all packet hashes match",
+    "extract-only-video": "passed; only selected track remains, all packet hashes match",
+    "audio-only-aac": "passed; M4A source codec and packet hashes preserved",
+    "audio-only-eac3": "passed; M4A source codec and packet hashes preserved",
+    "audio-only-flac": "passed; M4A source codec and packet hashes preserved",
+    "h264+raw-aac": "passed; decoded audio samples match",
+    "h264+raw-eac3": "passed; decoded audio samples match",
+    "h264+raw-flac": "passed; decoded audio samples match"
+  },
+  "ui": {
+    "layouts": {
+      "parse": {
+        "bodyClass": "has-media",
+        "labelSize": "21px",
+        "mode": "combined",
+        "width": 746
+      },
+      "queue": {
+        "bodyClass": "has-media",
+        "labelSize": "21px",
+        "mode": "combined",
+        "width": 746
+      },
+      "settings-dark": {
+        "bodyClass": "has-media",
+        "labelSize": "21px",
+        "mode": "combined",
+        "width": 746
+      },
+      "audio-mode": {
+        "bodyClass": "has-media",
+        "labelSize": "21px",
+        "mode": "audio",
+        "width": 746
+      }
+    },
+    "ok": true,
+    "passed": [
+      "parse displays media",
+      "episode DOM is bounded",
+      "selection survives paging",
+      "batch creates 25 tasks",
+      "queue polling preserves row DOM",
+      "task selection survives paging",
+      "queue search returns match",
+      "theme applies after save",
+      "reduced motion setting applies",
+      "logs arrive through bridge",
+      "Ctrl+L focuses link field",
+      "clear resets parsed selection",
+      "audio mode has independent audio qualities and M4A preview",
+      "audio queue row retains mode and output format",
+      "temporary mode does not change default",
+      "video-only mode warns there is no audio",
+      "video-only mode survives queue update",
+      "no horizontal viewport overflow",
+      "no JavaScript errors: "
+    ],
+    "renderer": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0"
+  },
+  "packaged_application_smoke": {
+    "size_mib": 6.61,
+    "window_seconds": 0.681,
+    "ready_seconds": 1.037,
+    "startup_log": "[2026-11-02 19:45:57] 内嵌界面就绪：WebView2 与 Python 通信正常",
+    "ffmpeg_version": "ffmpeg version bili-remux-f044c5e627 Copyright (c) 2000-2026 the FFmpeg developers",
+    "bundled_media_merge": "passed",
+    "exe_only_directory": false,
+    "runtime_cleaned_after_exit": true
+  },
+  "packaged_assets_match": true,
+  "live_account_tested": false
+}

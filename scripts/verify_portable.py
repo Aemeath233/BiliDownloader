@@ -47,6 +47,28 @@ user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = [
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    wintypes.LPWSTR,
+    ctypes.POINTER(wintypes.DWORD),
+]
+
+
+def process_image(process_id: int) -> Path | None:
+    handle = kernel32.OpenProcess(0x1000, False, process_id)
+    if not handle:
+        return None
+    try:
+        value = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(value))
+        if kernel32.QueryFullProcessImageNameW(handle, 0, value, ctypes.byref(size)):
+            return Path(value.value)
+        return None
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def descendant_ids(parent: int) -> set[int]:
@@ -94,12 +116,22 @@ def main() -> None:
     parser.add_argument(
         "--folder", action="store_true", help="Verify the complete folder build instead of the single EXE"
     )
-    folder = parser.parse_args().folder
-    executable = (
-        ROOT / "dist" / "folder" / "BiliDownloader" / "BiliDownloader.exe"
-        if folder
-        else ROOT / "dist" / "portable" / "BiliDownloader-Portable.exe"
+    parser.add_argument(
+        "--self-contained", action="store_true", help="Verify a build with bundled Fixed Version WebView2"
     )
+    parser.add_argument("--installed", type=Path, help="Verify an already installed EXE in its actual directory")
+    args = parser.parse_args()
+    if args.installed and (args.self_contained or args.folder):
+        parser.error("--installed cannot be combined with portable build flags")
+    folder = args.folder or bool(args.installed)
+    output_root = ROOT / "dist" / ("self-contained" if args.self_contained else "portable")
+    executable = (
+        output_root / "folder" / "BiliDownloader" / "BiliDownloader.exe"
+        if folder
+        else output_root / "BiliDownloader-Portable.exe"
+    )
+    if args.installed:
+        executable = args.installed.resolve()
     if not executable.is_file():
         raise FileNotFoundError(executable)
     with socket.socket() as probe:
@@ -112,7 +144,10 @@ def main() -> None:
         sandbox = Path(temporary)
         launch_dir = sandbox / "单文件 空目录"
         copied = launch_dir / executable.name
-        if folder:
+        if args.installed:
+            launch_dir = executable.parent
+            copied = executable
+        elif folder:
             shutil.copytree(executable.parent, launch_dir)
         else:
             launch_dir.mkdir()
@@ -143,7 +178,8 @@ def main() -> None:
                         report["window_seconds"] = round(time.perf_counter() - started, 3)
                 for log in (sandbox / "profile" / "BiliDownloader" / "logs").glob("*.log"):
                     startup_log = next(
-                        (line for line in log.read_text(encoding="utf-8-sig").splitlines() if "启动耗时" in line), ""
+                        (line for line in log.read_text(encoding="utf-8-sig").splitlines() if "内嵌界面就绪" in line),
+                        "",
                     )
                 if handle is not None and startup_log:
                     break
@@ -159,9 +195,22 @@ def main() -> None:
                 "certifi/cacert.pem",
                 "ffmpeg/ffmpeg.exe",
                 "ffmpeg/LICENSE.txt",
+                "bili_client/desktop/assets/index.html",
+                "bili_client/desktop/assets/app.js",
+                "bili_client/desktop/assets/app.css",
+                "webview/lib/Microsoft.Web.WebView2.Core.dll",
             ):
                 if not (extracted / relative).is_file():
                     raise RuntimeError(f"Missing bundled dependency: {relative}")
+            if args.self_contained:
+                if not (extracted / "webview2" / "msedgewebview2.exe").is_file():
+                    raise RuntimeError("Self-contained build is missing Fixed Version WebView2")
+                report["bundled_webview2"] = True
+                images = [process_image(pid) for pid in descendant_ids(process.pid)]
+                renderers = [path for path in images if path and path.name.lower() == "msedgewebview2.exe"]
+                if not any(path.resolve().is_relative_to((extracted / "webview2").resolve()) for path in renderers):
+                    raise RuntimeError("The embedded renderer did not use the bundled Fixed Version runtime")
+                report["bundled_renderer_used"] = True
 
             bundled_ffmpeg = extracted / "ffmpeg" / "ffmpeg.exe"
 
@@ -180,8 +229,19 @@ def main() -> None:
 
             report["ffmpeg_version"] = run_ffmpeg("-version").splitlines()[0]
             video, audio, merged = (sandbox / name for name in ("video.mp4", "audio.m4a", "merged.mp4"))
-            run_ffmpeg("-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1", "-an", "-c:v", "mpeg4", "-y", str(video))
-            run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", "-vn", "-c:a", "aac", "-y", str(audio))
+            # Fixture creation is a developer task; the shipped remuxer needs no encoders or lavfi.
+            generator = ROOT / "vendor" / "ffmpeg" / "bin" / "ffmpeg.exe"
+            for arguments in (
+                ["-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1", "-an", "-c:v", "libx264", "-y", str(video)],
+                ["-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", "-vn", "-c:a", "aac", "-y", str(audio)],
+            ):
+                subprocess.run(
+                    [str(generator), "-loglevel", "error", *arguments],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=20,
+                    check=True,
+                )
             FFmpegService(str(bundled_ffmpeg)).merge(video, audio, merged)
             assert merged.is_file() and merged.stat().st_size > 0
             report["bundled_media_merge"] = "passed"
@@ -209,7 +269,13 @@ def main() -> None:
         if not report["runtime_cleaned_after_exit"]:
             raise RuntimeError("Runtime extraction was not cleaned up after normal exit")
 
-    output = ROOT / "build" / ("folder-verification.json" if folder else "portable-verification.json")
+    prefix = "self-contained-" if args.self_contained else ""
+    name = (
+        "installed-verification.json"
+        if args.installed
+        else prefix + ("folder-verification.json" if folder else "portable-verification.json")
+    )
+    output = ROOT / "build" / name
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=True, indent=2))

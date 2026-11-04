@@ -6,7 +6,7 @@ import os
 import threading
 from pathlib import Path
 
-from bili_client.core.models import AppConfig
+from bili_client.core.models import AppConfig, DownloadMode
 from bili_client.services.file_io import atomic_write_text
 
 
@@ -45,6 +45,7 @@ class ConfigStore:
                 cleanup_temp_files=_as_bool(data.get("cleanup_temp_files"), config.cleanup_temp_files),
                 steady_mode=_as_bool(data.get("steady_mode"), config.steady_mode),
                 animations_enabled=_as_bool(data.get("animations_enabled"), config.animations_enabled),
+                default_download_mode=_as_choice(data.get("default_download_mode"), "combined", set(DownloadMode)),
                 speed_limit_mb=_as_float(data.get("speed_limit_mb"), config.speed_limit_mb, minimum=0.0),
                 max_concurrent_tasks=_as_int(
                     data.get("max_concurrent_tasks"),
@@ -82,6 +83,7 @@ class ConfigStore:
                 "ffmpeg_path": config.ffmpeg_path.strip() or "ffmpeg",
                 "appearance_mode": config.appearance_mode.strip() or "system",
                 "animations_enabled": bool(config.animations_enabled),
+                "default_download_mode": DownloadMode(config.default_download_mode).value,
             }
             if preserve_legacy_sessdata and config.sessdata.strip():
                 payload["sessdata"] = config.sessdata.strip()

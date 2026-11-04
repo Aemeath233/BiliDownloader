@@ -12,11 +12,18 @@
 >
 > 本声明为使用倡议；源码授权仍以 [MIT 许可证](LICENSE) 为准，不构成对该许可证新增的非商业限制。
 
-面向 Windows 的 B 站视频下载客户端。支持分享链接、BV / ep / ss 编号、分集与画质选择、下载队列、扫码登录和全局限速。
+面向 Windows 的 B 站视频下载客户端。使用内嵌 WebView2 界面和本地 Python 下载核心，双击使用，不启动网页服务、不需要打开浏览器。支持分享链接、BV / ep / ss 编号、分集与画质选择、下载队列、扫码登录和全局限速。
 
-**普通用户下载 [Release 便携版](https://github.com/Aemeath233/BiliDownloader/releases/latest)，开发者按下面的源码教程运行。源码仓库不携带 Python 环境或 FFmpeg。**
+**普通用户下载 [v2.2.0 安装包](https://github.com/Aemeath233/BiliDownloader/releases/download/v2.2.0/BiliDownloader-Setup.exe)，开发者按下面的源码教程运行。完整附件见 [GitHub Releases](https://github.com/Aemeath233/BiliDownloader/releases/latest)，本轮改动见 [更新日志](CHANGELOG.md)。源码仓库不携带 Python 环境或 FFmpeg。**
 
 ## 功能
+
+- 2.2 使用蓝白色桌面布局：下载按钮与本次保存目录固定可见，单视频直接选择内容和品质，合集再显示分集列表。
+- 可直接为当前解析结果选择保存目录，不跳转设置，也不改变默认目录；下一次解析仍使用默认位置。
+- 分集勾选和页面切换保留滚动位置；添加任务后清除旧筛选，避免新任务被隐藏。
+- 下载内容可选「视频＋音频」「仅音频」「仅视频（无声）」；设置中可修改默认值。
+- 仅音频提供当前账号实际可用的音频品质，保存为 M4A 并保留源编码；仅视频保存无声音轨的 MP4。旧式音画合流资源会先下载原流再提取。
+- 下载模式随任务持久保存，重试和重新选择品质时保留；不同模式分别判断重复任务。此版本不提供 MP3 转码。
 
 - 支持 `bilibili.com` 视频 / 番剧链接和 `b23.tv` 短链，也可粘贴分享文本或直接输入编号。
 - 分集分页、全选、反选、画质记忆、文件名预览与命名模板。
@@ -26,20 +33,29 @@
 - 跨页选择任务并批量取消、重试或移除；重复下载提醒，已完成视频可直接打开或在资源管理器中定位。
 - 刷新当前分集的画质，失败任务可一键返回重新选择档位；重试从头下载，原记录与已有文件保留。
 - 扫码登录，Windows 当前用户 DPAPI 保护账号文件；Cookie 不发送给媒体 CDN。
-- 先显示窗口、后台准备服务、其他页面按需创建；平滑进度、页面过渡与操作提示。
+- 内嵌 HTML/CSS/JavaScript，后台准备下载服务；页面即时切换、短距离过渡、平滑进度与操作提示。
 - 浅色 / 深色 / 跟随系统主题；界面动画可在设置里关闭。
 
-![下载队列示例](docs/images/queue.png)
+![添加下载示例](docs/images/workflow-collection.png)
 
 图片为演示数据，不代表实际下载速度或账号记录。
 
-## 便携版：不需要运行环境
+## 安装版（推荐）
 
-1. 打开 [GitHub Releases](https://github.com/Aemeath233/BiliDownloader/releases/latest)。
-2. 下载 `BiliDownloader-Portable.exe`，Windows 10/11 **64 位**电脑直接双击。
+1. 下载 [BiliDownloader-Setup.exe](https://github.com/Aemeath233/BiliDownloader/releases/download/v2.2.0/BiliDownloader-Setup.exe)，在 Windows 10/11 **64 位**电脑双击。
+2. 按安装向导完成安装，从桌面或开始菜单启动。
 3. 粘贴链接，必要时扫码登录，选择分集与画质后加入队列。
 
-单文件已包含 Python、程序依赖和 FFmpeg。只发送这个 exe 即可，不需要另带 `_internal` 文件夹。程序访问 B 站时需要网络；接收方自行登录。
+安装包包含 Python、前端资源和专用于音视频封装的精简 FFmpeg；安装时展开一次，之后直接从安装目录加载，不再每次启动解包。使用系统已有的 Microsoft WebView2 Runtime；若缺少，向导会提示并联网安装微软组件，不重复携带整套浏览器运行时。默认安装到当前用户的 `%LOCALAPPDATA%/Programs/BiliDownloader`，无需管理员权限。
+
+安装包设有 50 MiB 构建上限。支持覆盖升级、桌面/开始菜单快捷方式和 Windows 应用卸载入口；升级清理旧程序依赖，保留账号、设置、下载记录与已下载视频。卸载只移除程序文件和快捷方式，保留用户数据及共享 WebView2。
+
+## 可选便携构建
+
+- **标准便携版**：使用电脑已有的 Microsoft WebView2 Runtime；构建设有 50 MiB 体积上限。
+- **运行时完整包（按需构建）**：额外携带固定版 WebView2，会增加约 300 MiB；仅供确实缺少运行时、又不能安装的设备使用。
+
+标准构建位于 `dist/portable/`，运行时完整包位于 `dist/self-contained/`。单文件便携方案需要每次解包，启动比安装版慢，不作为默认交付。本地历史输出可能对应之前构建，重新分发前请按构建文档重建验证。
 
 启动时会自动释放依赖到临时目录，正常退出时清理，所以启动比文件夹版稍慢。Release 提供 SHA256 校验文件和第三方组件信息。
 
@@ -48,6 +64,8 @@
 ## 源码运行
 
 推荐 Python 3.11；回归检查覆盖 Python 3.11 和 3.12。源码用户需要自行安装 FFmpeg，并将其 `bin` 目录加入 PATH。
+
+源码运行还需要 Microsoft WebView2 Runtime。Windows 11 已预装、绝大多数 Windows 10 设备也已有该组件（[微软说明](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)）；缺少时需先安装微软运行时，或使用按需提供的运行时完整包。前端资源已随 Python 包提供，不需要 Node.js、npm 或前端开发服务器。
 
 ### 1. 安装 FFmpeg 并配置 PATH
 
@@ -88,6 +106,7 @@ uv run --no-project --python 3.11 --with-requirements requirements.txt python ma
 | 快捷键 | 操作 |
 | --- | --- |
 | `Ctrl+L` | 打开添加任务页并聚焦链接输入 |
+| `Enter` | 在链接输入框中解析；中文输入法选字时不触发 |
 | `Ctrl+Enter` | 在链接输入框中解析 |
 | `Ctrl+F` | 搜索下载队列；日志页中聚焦日志筛选 |
 | `Ctrl+1` 至 `Ctrl+4` | 切换添加任务、队列、设置、日志 |

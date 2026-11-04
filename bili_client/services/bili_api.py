@@ -212,7 +212,9 @@ class BilibiliApi:
             "任务已停止，未自动降档；请重新读取画质后选择当前可下载档位。"
         )
 
-    def get_streams(self, episode: EpisodeInfo, qn: int, sessdata: str = "") -> tuple[StreamInfo, StreamInfo | None]:
+    def get_streams(
+        self, episode: EpisodeInfo, qn: int, sessdata: str = "", *, include_audio: bool = True
+    ) -> tuple[StreamInfo, StreamInfo | None]:
         data = self._playurl(episode, qn, sessdata)
         play_data = data.get("result", data.get("data", {}))
         self._raise_if_preview_only(play_data)
@@ -254,7 +256,7 @@ class BilibiliApi:
         )
 
         audio_stream = None
-        if audio_candidates:
+        if audio_candidates and include_audio:
             selected_audio = audio_candidates[0]
             audio_urls = self._pick_stream_urls(selected_audio)
             audio_url = audio_urls[0]
@@ -268,6 +270,59 @@ class BilibiliApi:
             )
 
         return video_stream, audio_stream
+
+    @staticmethod
+    def _audio_candidates(play_data: dict) -> list[tuple[dict, str]]:
+        dash = play_data.get("dash") or {}
+        groups = [(dash.get("audio") or [], ""), ((dash.get("dolby") or {}).get("audio") or [], "Dolby 音频")]
+        flac = (dash.get("flac") or {}).get("audio")
+        if isinstance(flac, dict):
+            groups.append(([flac], "FLAC 无损"))
+        candidates = {}
+        for items, label in groups:
+            for item in items:
+                qn = int(item.get("id") or 0)
+                if qn > 0 and (item.get("baseUrl") or item.get("base_url")):
+                    bitrate = int(item.get("bandwidth") or 0)
+                    candidates.setdefault(
+                        qn, (item, label or (f"音频 {round(bitrate / 1000)} kbps" if bitrate else f"源音频 {qn}"))
+                    )
+        return sorted(candidates.values(), key=lambda value: int(value[0].get("bandwidth") or 0), reverse=True)
+
+    def get_audio_quality_options(self, episode: EpisodeInfo, sessdata: str = "") -> list[QualityOption]:
+        data = self._playurl(episode, 127, sessdata)
+        play_data = data.get("result", data.get("data", {}))
+        self._raise_if_preview_only(play_data)
+        candidates = self._audio_candidates(play_data)
+        if candidates:
+            return [
+                QualityOption(int(item["id"]), label, "只下载所选音轨，保存为 M4A，保留源编码、不转码。")
+                for item, label in candidates
+            ]
+        if not play_data.get("dash") and (play_data.get("durl") or play_data.get("durls")):
+            return [
+                QualityOption(
+                    int(play_data.get("quality") or 1),
+                    "源音轨",
+                    "此资源只有音画合流：需要下载原流，再提取音轨保存为 M4A，不转码。",
+                )
+            ]
+        raise BiliApiError("此资源没有可单独下载的音轨，请选择视频＋音频，或确认账号权限")
+
+    def get_audio_stream(self, episode: EpisodeInfo, qn: int, sessdata: str = "") -> StreamInfo:
+        data = self._playurl(episode, 127, sessdata)
+        play_data = data.get("result", data.get("data", {}))
+        self._raise_if_preview_only(play_data)
+        if not play_data.get("dash"):
+            stream, _ = self._streams_from_durl(play_data, sessdata, self._episode_referer(episode))
+            stream.kind = "audio"
+            return stream
+        selected = next((item for item, _ in self._audio_candidates(play_data) if int(item["id"]) == qn), None)
+        if selected is None:
+            raise QualityUnavailableError("所选音频品质当前不可下载，请刷新音频品质后重试；未自动降档")
+        urls = self._pick_stream_urls(selected)
+        referer = self._episode_referer(episode)
+        return StreamInfo("audio", urls[0], self._probe_size(urls[0], sessdata, referer=referer), urls[1:], referer)
 
     def _streams_from_durl(
         self,
