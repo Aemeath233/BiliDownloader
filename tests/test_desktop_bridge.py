@@ -63,7 +63,7 @@ class DesktopBridgeTests(unittest.TestCase):
         self.rt.config = replace(self.rt.config, filename_template="{index}_{title}_{quality}", organize_by_source=True)
         preview = self.invoke("preview", payload)
         self.assertEqual("1_第一集_1080P.mp4", preview["filename"])
-        self.assertTrue(Path(preview["directory"]).resolve().is_relative_to(Path(self.temp.name)))
+        self.assertTrue(Path(preview["directory"]).resolve().is_relative_to(Path(self.temp.name).resolve()))
         self.assertEqual(2, self.invoke("add", payload)["created"])
         specs = self.rt.manager.create_tasks.call_args.args[0]
         self.assertEqual(2, len(specs))
