@@ -1,6 +1,6 @@
 # WinUI 3 开发与验证
 
-当前原生客户端为 3.0 预览开发版，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。仓库内的 Python/WebView2 项目对应已发布的 v2.2.0，其运行与构建方法见 [旧版构建说明](BUILDING.md)。
+当前原生客户端为 3.0.0-preview.1，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。[Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0-preview.1) 包含程序所需的 .NET、WinUI 和精简 FFmpeg。仓库内的 Python/WebView2 项目对应已发布的 v2.2.0，其运行与构建方法见 [旧版构建说明](BUILDING.md)。
 
 ## 源码结构
 
@@ -15,6 +15,8 @@
 | `scripts/verify_native.ps1` | 完整原生检查入口 |
 | `scripts/verify_winui.ps1` | UI 检查与完整交互场景 |
 | `scripts/verify_publish.ps1` | 全新目录发布及生产 EXE 启动退出检查 |
+| `scripts/build_native_installer.ps1` | 原生安装包、运行组件声明、构建清单及校验文件 |
+| `scripts/verify_native_installer.ps1` | 独立安装标识下的升级、启动、封装、快捷方式和卸载检查 |
 
 UI 在同一窗口中切换四个页面。解析与下载异步运行，切页保留解析结果和后台任务。下载核心负责任务状态，UI 定时读取进度和计数。文件完成封装后以避让同名文件的方式发布。
 
@@ -55,7 +57,24 @@ dotnet publish .\src\BiliDownloader.WinUI\BiliDownloader.WinUI.csproj -c Release
 
 发布目录包含 .NET 和 WinUI 运行文件。运行与移动时保留整个目录。项目显式将应用 PRI 与编译 XAML 加入发布清单，确保正常构建和发布使用相同的应用资源。
 
-如果 `vendor/ffmpeg-minimal/bin/ffmpeg.exe` 存在，会复制到程序目录。开发者也可以在设置中选择外部 FFmpeg。正式分发前须按 [第三方说明](../THIRD_PARTY_NOTICES.md) 保留实际携带组件的许可证、FFmpeg 构建信息与对应源码，并完成安装包验收。
+如果 `vendor/ffmpeg-minimal/bin/ffmpeg.exe` 存在，会复制到程序目录。开发者也可以在设置中选择外部 FFmpeg。安装包构建会按 [第三方说明](../THIRD_PARTY_NOTICES.md) 汇集实际携带组件的许可证、FFmpeg 构建信息与对应源码。
+
+## 安装包构建与验证
+
+准备精简 FFmpeg 和 Inno Setup 6 后运行。
+
+```powershell
+.\scripts\build_native_installer.ps1
+# 非标准编译器位置可以显式指定
+.\scripts\build_native_installer.ps1 -InnoCompiler 'C:\Tools\Inno Setup 6\ISCC.exe'
+.\scripts\verify_native_installer.ps1
+```
+
+输出位于 `dist/native-installer/`。安装包默认安装到 `%LOCALAPPDATA%\Programs\BiliDownloader`，提供桌面快捷方式、开始菜单入口和系统卸载入口。安装时要求先关闭客户端，覆盖升级清理旧 `_internal` 程序依赖，保留用户目录和已下载文件。
+
+验证脚本以独立 AppId 与快捷方式名称编译同一套安装脚本，逐文件比对发行载荷。存在本机 v2.2.0 安装时，会只读取其程序 EXE 和 `_internal` 创建隔离旧版，再验证升级到原生版。也可以用 `-LegacyApplicationDirectory` 指向准备好的旧版程序目录。随后验证三次启动、DPAPI 迁移、使用安装目录 FFmpeg 的核心回归、运行中阻止覆盖与卸载、覆盖升级、新安装和卸载。报告和日志保存在 `build/native-installer-verification`。
+
+当前 Windows 安装流程在开发机以隔离安装标识验证。缺少开发运行环境的干净虚拟机与生产安装标识下的升级需继续验收。
 
 ## 完整自动化检查
 

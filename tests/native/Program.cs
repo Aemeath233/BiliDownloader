@@ -12,7 +12,7 @@ var cases = new List<object>();
 var failures = 0;
 var generator = Path.Combine(workspace, "vendor", "ffmpeg", "bin", "ffmpeg.exe");
 var probe = Path.Combine(workspace, "vendor", "ffmpeg", "bin", "ffprobe.exe");
-var remux = Path.Combine(workspace, "vendor", "ffmpeg-minimal", "bin", "ffmpeg.exe");
+var remux = args.Length > 2 ? Path.GetFullPath(args[2]) : Path.Combine(workspace, "vendor", "ffmpeg-minimal", "bin", "ffmpeg.exe");
 var mediaDirectory = Path.Combine(output, "media");
 Directory.CreateDirectory(mediaDirectory);
 var videoPath = Path.Combine(mediaDirectory, "video.mp4");
