@@ -9,6 +9,33 @@ permissions:
   contents: read
 
 jobs:
+  native-build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile native UI regression scenarios
+        run: dotnet build src/BiliDownloader.WinUI/BiliDownloader.WinUI.csproj -c Release -p:Platform=x64 -p:UiRegression=true -o build/ci-ui-tests
+      - name: Compile native core regression program
+        run: dotnet build tests/native/BiliDownloader.Core.Tests.csproj -c Release
+      - name: Publish production client
+        run: dotnet publish src/BiliDownloader.WinUI/BiliDownloader.WinUI.csproj -c Release -p:Platform=x64 -p:UiRegression=false -o build/ci-publish
+      - name: Check published application resources
+        shell: pwsh
+        run: |
+          foreach ($resource in @('BiliDownloader.exe', 'BiliDownloader.pri', 'App.xbf', 'MainWindow.xbf', 'Assets/brand.png', 'logo.ico')) {
+            if (-not (Test-Path -LiteralPath (Join-Path 'build/ci-publish' $resource))) { throw "Published resource missing $resource" }
+          }
+      - name: Audit native dependencies
+        shell: pwsh
+        run: |
+          $audit = dotnet list src/BiliDownloader.WinUI/BiliDownloader.WinUI.csproj package --vulnerable --include-transitive --format json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet audit failed' }
+          $advisories = @($audit.projects.frameworks.topLevelPackages.vulnerabilities) + @($audit.projects.frameworks.transitivePackages.vulnerabilities)
+          if (@($advisories | Where-Object { $null -ne $_ }).Count -gt 0) { throw 'NuGet reported known vulnerabilities' }
+
   check:
     runs-on: windows-latest
     strategy:

@@ -1,0 +1,150 @@
+<Window x:Class="BiliDownloader.WinUI.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="using:BiliDownloader.WinUI">
+ <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <Grid.Resources>
+   <Style x:Key="SectionTitle" TargetType="TextBlock"><Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+   <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+   <Style TargetType="Button"><Setter Property="CornerRadius" Value="6"/></Style>
+   <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="6"/></Style>
+  </Grid.Resources>
+  <Grid.RowDefinitions><RowDefinition Height="32"/><RowDefinition Height="*"/><RowDefinition Height="24"/></Grid.RowDefinitions>
+  <Grid x:Name="TitleRegion" Background="{ThemeResource LayerFillColorDefaultBrush}">
+   <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,150,0" VerticalAlignment="Center">
+    <Image Source="Assets/brand.png" Width="24" Height="24"/>
+    <TextBlock Text="BiliDownloader" FontSize="12" VerticalAlignment="Center"/>
+   </StackPanel>
+  </Grid>
+  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Top"
+    IsBackButtonVisible="Collapsed" IsPaneToggleButtonVisible="False" IsSettingsVisible="False" SelectionChanged="NavigationChanged"
+    AlwaysShowHeader="False" IsPaneVisible="True">
+   <NavigationView.MenuItems>
+    <NavigationViewItem x:Name="ParseNav" Content="添加下载" Tag="parse" Icon="Add"/>
+    <NavigationViewItem x:Name="QueueNav" Content="下载队列" Tag="queue" Icon="Download"/>
+    <NavigationViewItem Content="运行记录" Tag="logs" Icon="Document"/>
+    <NavigationViewItem Content="设置" Tag="settings" Icon="Setting"/>
+   </NavigationView.MenuItems>
+   <Grid Padding="20,12,20,0" RowSpacing="10">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Grid ColumnSpacing="16">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <StackPanel Spacing="2"><TextBlock x:Name="PageTitle" Text="添加下载" FontSize="22" FontWeight="SemiBold"/><TextBlock x:Name="PageSubtitle" Text="粘贴分享链接，选择需要保存的内容" Style="{StaticResource MutedText}"/></StackPanel>
+     <Button x:Name="AccountButton" AutomationProperties.Name="账号与扫码登录" Grid.Column="1" Click="AccountClicked" VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Contact"/><TextBlock x:Name="AccountLabel" Text="扫码登录"/></StackPanel></Button>
+    </Grid>
+    <InfoBar x:Name="Notice" Grid.Row="1" IsOpen="False" IsClosable="True" Severity="Informational"/>
+    <Grid x:Name="ParsePage" Grid.Row="2" RowSpacing="10">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBox x:Name="LinkInput" PlaceholderText="粘贴 B 站分享链接或 BV / ep / ss 编号" AutomationProperties.Name="视频链接" KeyDown="LinkKeyDown" TextChanged="LinkChanged" MinHeight="34" VerticalContentAlignment="Center"/>
+      <Button x:Name="ParseButton" Grid.Column="1" Content="解析" MinWidth="80" Click="ParseClicked"/>
+     </Grid>
+     <ProgressBar x:Name="ParseProgress" IsIndeterminate="True" VerticalAlignment="Bottom" Height="2" Visibility="Collapsed"/>
+     <Grid Grid.Row="1">
+      <StackPanel x:Name="ParseEmpty" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10" Margin="0,8">
+       <SymbolIcon Symbol="Link" Foreground="{StaticResource BrandBrush}"/>
+       <TextBlock Text="把想保存的视频带到这里" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+       <TextBlock Text="支持单视频、多 P 合集与番剧" Style="{StaticResource MutedText}" HorizontalAlignment="Center"/>
+       <Button Content="粘贴链接" Click="PasteClicked" HorizontalAlignment="Center"/>
+      </StackPanel>
+      <Grid x:Name="MediaPanel" Visibility="Collapsed" RowSpacing="10">
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+       <StackPanel Spacing="3"><TextBlock x:Name="MediaTitle" FontSize="16" FontWeight="SemiBold" MaxLines="1" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="MediaSource" Style="{StaticResource MutedText}"/></StackPanel>
+       <Grid Grid.Row="1" ColumnSpacing="20">
+        <Grid.ColumnDefinitions><ColumnDefinition x:Name="EpisodeColumn" Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Grid x:Name="EpisodePanel" RowSpacing="8">
+         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="EpisodeCount" Text="选择分集" VerticalAlignment="Center" FontWeight="SemiBold"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"><Button Content="全选" Click="SelectAllEpisodes" Padding="10,4"/><Button Content="反选" Click="InvertEpisodes" Padding="10,4"/></StackPanel>
+         </Grid>
+         <ListView x:Name="EpisodeList" Grid.Row="1" SelectionMode="Multiple" SelectionChanged="EpisodeSelectionChanged" IsMultiSelectCheckBoxEnabled="True" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel CacheLength="1"/></ItemsPanelTemplate></ListView.ItemsPanel>
+          <ListView.ItemContainerStyle><Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="8,2"/></Style></ListView.ItemContainerStyle>
+          <ListView.ItemTemplate><DataTemplate x:DataType="local:EpisodeRow"><TextBlock Text="{x:Bind DisplayTitle}" TextWrapping="NoWrap" MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Title}" Margin="0,4"/></DataTemplate></ListView.ItemTemplate>
+         </ListView>
+        </Grid>
+        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+         <Grid x:Name="DownloadOptions" RowSpacing="10" Padding="0,0,4,8">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="QualityColumn" Width="0"/></Grid.ColumnDefinitions>
+          <StackPanel Spacing="8"><TextBlock Text="下载内容" FontWeight="SemiBold" MinHeight="28" VerticalAlignment="Center"/>
+           <ComboBox x:Name="ModeSelect" HorizontalAlignment="Stretch" SelectionChanged="ModeChanged" AutomationProperties.Name="下载内容">
+            <ComboBoxItem Content="完整视频（视频＋音频）"/><ComboBoxItem Content="仅音频（M4A）"/><ComboBoxItem Content="无声视频（MP4）"/>
+           </ComboBox>
+          </StackPanel>
+          <StackPanel x:Name="QualityOptions" Grid.Row="1" Spacing="8"><Grid MinHeight="28"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="QualityLabel" Text="画质" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Content="刷新" Click="RefreshQualities" Padding="10,4"/></Grid>
+           <ComboBox x:Name="QualitySelect" HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="QualityChanged" AutomationProperties.Name="下载品质"/>
+           <TextBlock x:Name="QualityNote" Style="{StaticResource MutedText}" FontSize="12"/>
+          </StackPanel>
+          <Expander x:Name="FilenameOptions" Grid.Row="2" Header="文件名预览" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><TextBlock x:Name="FilenamePreview" TextWrapping="Wrap" FontSize="12"/></Expander>
+         </Grid>
+        </ScrollViewer>
+       </Grid>
+      </Grid>
+     </Grid>
+     <Border Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,10">
+      <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <StackPanel VerticalAlignment="Center" Spacing="3"><TextBlock Text="保存到" Style="{StaticResource MutedText}" FontSize="12"/><TextBlock x:Name="Destination" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="本次下载的保存目录"/></StackPanel>
+       <Button x:Name="DestinationButton" Grid.Column="1" Content="更改" Click="ChooseDestination" VerticalAlignment="Center"/>
+       <Button x:Name="AddButton" AutomationProperties.Name="开始下载所选分集" Grid.Column="2" MinWidth="120" Height="36" Style="{StaticResource AccentButtonStyle}" IsEnabled="False" Click="AddClicked" VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Download"/><TextBlock Text="开始下载"/></StackPanel></Button>
+      </Grid>
+     </Border>
+    </Grid>
+    <Grid x:Name="QueuePage" Grid.Row="2" Visibility="Collapsed" RowSpacing="12">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions>
+      <ComboBox x:Name="QueueFilter" SelectedIndex="0" SelectionChanged="QueueFilterChanged" AutomationProperties.Name="任务状态筛选"><ComboBoxItem Content="全部任务"/><ComboBoxItem Content="进行中"/><ComboBoxItem Content="已完成"/><ComboBoxItem Content="失败 / 取消"/></ComboBox>
+      <TextBox x:Name="QueueSearch" Grid.Column="1" PlaceholderText="搜索标题或文件名" TextChanged="QueueSearchChanged"/>
+     </Grid>
+     <Grid Grid.Row="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="选择全部" Click="SelectQueue"/><TextBlock x:Name="SelectedCount" Text="已选 0 项" VerticalAlignment="Center" Style="{StaticResource MutedText}"/><Button x:Name="BatchButton" Content="批量操作" IsEnabled="False"><Button.Flyout><MenuFlyout><MenuFlyoutItem Text="取消所选下载" Click="CancelSelected"/><MenuFlyoutItem Text="重试所选任务" Click="RetrySelected"/><MenuFlyoutItem Text="移除所选记录" Click="RemoveSelected"/><MenuFlyoutSeparator/><MenuFlyoutItem Text="取消选择" Click="DeselectQueue"/></MenuFlyout></Button.Flyout></Button></StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="重试失败 / 取消" Click="RetryFailed"/><Button Content="清理已结束" Click="ClearFinished"/></StackPanel>
+     </Grid>
+     <ListView x:Name="QueueList" Grid.Row="2" SelectionMode="Multiple" IsMultiSelectCheckBoxEnabled="True" SelectionChanged="QueueSelectionChanged" Margin="-8,0,-8,8" HorizontalContentAlignment="Stretch">
+      <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel CacheLength="1"/></ItemsPanelTemplate></ListView.ItemsPanel>
+      <ListView.ItemContainerStyle><Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="8,8"/></Style></ListView.ItemContainerStyle>
+      <ListView.ItemTemplate><DataTemplate x:DataType="local:TaskRow">
+       <Grid RowSpacing="5" ColumnSpacing="16">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel Spacing="3"><TextBlock Text="{x:Bind Title}" FontSize="14" FontWeight="SemiBold" MaxLines="1" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Title}"/><TextBlock Text="{x:Bind Meta, Mode=OneWay}" FontSize="12" Style="{StaticResource MutedText}" MaxLines="1" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind OutputPath, Mode=OneWay}"/></StackPanel>
+        <Border Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="10,4" VerticalAlignment="Top" HorizontalAlignment="Right"><TextBlock Text="{x:Bind StatusText, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}" FontSize="12"/></Border>
+        <ProgressBar Grid.Row="1" Value="{x:Bind Percent, Mode=OneWay}" IsIndeterminate="{x:Bind Indeterminate, Mode=OneWay}" Visibility="{x:Bind ProgressVisibility, Mode=OneWay}" Height="3"/>
+        <TextBlock Grid.Row="2" Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+        <StackPanel Grid.Column="1" Grid.Row="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+         <Button x:Name="OpenTaskButton" x:Load="{x:Bind IsCompleted, Mode=OneWay}" Content="打开" Tag="{x:Bind Id}" Click="OpenTask" Padding="10,5"/>
+         <Button x:Name="LocateTaskButton" x:Load="{x:Bind IsCompleted, Mode=OneWay}" Content="定位" Tag="{x:Bind Id}" Click="LocateTask" Padding="10,5"/>
+         <Button x:Name="CancelTaskButton" x:Load="{x:Bind CanCancel, Mode=OneWay}" Content="取消" Tag="{x:Bind Id}" Click="CancelTask" Padding="10,5"/>
+         <Button x:Name="RetryTaskButton" x:Load="{x:Bind CanRetry, Mode=OneWay}" Content="重试" Tag="{x:Bind Id}" Click="RetryTask" Padding="10,5"/>
+         <Button x:Name="MoreTaskButton" x:Load="{x:Bind CanRetry, Mode=OneWay}" Tag="{x:Bind Id}" Padding="8,5" AutomationProperties.Name="更多任务操作"><FontIcon Glyph="&#xE712;" FontSize="14"/><Button.Flyout><MenuFlyout><MenuFlyoutItem Text="重新选择品质" Tag="{x:Bind Id}" Click="ReselectTask"/></MenuFlyout></Button.Flyout></Button>
+         <Button x:Name="RemoveTaskButton" x:Load="{x:Bind CanRemove, Mode=OneWay}" Content="移除" Tag="{x:Bind Id}" Click="RemoveTask" Padding="10,5"/>
+        </StackPanel>
+       </Grid>
+      </DataTemplate></ListView.ItemTemplate>
+     </ListView>
+     <StackPanel x:Name="QueueEmpty" Grid.Row="2" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="QueueEmptyTitle" Text="这里还没有任务" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="下载进度和保存的文件会显示在这里" Style="{StaticResource MutedText}"/><Button Content="添加下载" Click="GoParse" HorizontalAlignment="Center"/></StackPanel>
+    </Grid>
+    <ScrollViewer x:Name="SettingsPage" Grid.Row="2" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+     <StackPanel MaxWidth="760" HorizontalAlignment="Left" Spacing="12" Padding="0,0,16,20">
+      <TextBlock Text="下载" Style="{StaticResource SectionTitle}"/>
+      <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="SettingDirectory" Header="默认保存目录" MinWidth="320"/><Button Grid.Column="1" Content="浏览" Click="ChooseDefaultDirectory" VerticalAlignment="Bottom"/></Grid>
+      <ComboBox x:Name="SettingMode" Header="默认下载内容" HorizontalAlignment="Stretch"><ComboBoxItem Content="完整视频"/><ComboBoxItem Content="仅音频"/><ComboBoxItem Content="无声视频"/></ComboBox>
+      <TextBox x:Name="SettingTemplate" Header="文件名模板" Description="支持 {title}、{media}、{quality}、{bvid}、{cid}、{index}、{total}"/>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="按来源建立子文件夹" VerticalAlignment="Center"/><ToggleSwitch x:Name="SettingOrganize" Grid.Column="1" AutomationProperties.Name="按来源建立子文件夹" OnContent="已开启" OffContent="已关闭"/></Grid>
+      <Grid ColumnSpacing="24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><NumberBox x:Name="SettingConcurrent" Header="同时下载任务数" Minimum="1" Maximum="16" SpinButtonPlacementMode="Compact"/><NumberBox x:Name="SettingSpeed" Grid.Column="1" Header="全局限速（MiB/s，0 为不限速）" Minimum="0" Maximum="10240" SmallChange="1" SpinButtonPlacementMode="Compact"/></Grid>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="下载结束后清理临时文件" VerticalAlignment="Center"/><ToggleSwitch x:Name="SettingCleanup" Grid.Column="1" AutomationProperties.Name="下载结束后清理临时文件" OnContent="已开启" OffContent="已关闭"/></Grid>
+      <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="SettingFFmpeg" Header="FFmpeg 路径" Description="填写 ffmpeg 使用内置版本，也可指定完整路径"/><Button Grid.Column="1" Content="浏览" Click="ChooseFFmpeg" VerticalAlignment="Center"/></Grid>
+      <TextBlock Text="外观" Style="{StaticResource SectionTitle}"/>
+      <ComboBox x:Name="SettingTheme" Header="主题" HorizontalAlignment="Stretch"><ComboBoxItem Content="跟随系统"/><ComboBoxItem Content="浅色"/><ComboBoxItem Content="深色"/></ComboBox>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="界面动画" VerticalAlignment="Center"/><ToggleSwitch x:Name="SettingAnimations" Grid.Column="1" AutomationProperties.Name="界面动画" OnContent="已开启" OffContent="已关闭"/></Grid>
+      <Button Content="保存设置" Style="{StaticResource AccentButtonStyle}" Click="SaveSettings"/>
+      <TextBlock Text="BiliDownloader 3.0 · C# / WinUI 3" Style="{StaticResource MutedText}" FontSize="12"/>
+     </StackPanel>
+    </ScrollViewer>
+    <Grid x:Name="LogsPage" Grid.Row="2" Visibility="Collapsed" RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Button Content="打开日志目录" Click="OpenLogs"/><ListView x:Name="LogList" Grid.Row="1" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Margin="0,4" IsTextSelectionEnabled="True"/></DataTemplate></ListView.ItemTemplate></ListView></Grid>
+   </Grid>
+  </NavigationView>
+  <Grid Grid.Row="2" Background="{ThemeResource LayerFillColorDefaultBrush}" Padding="16,0"><TextBlock x:Name="StatusLine" Text="准备就绪" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></Grid>
+ </Grid>
+</Window>
