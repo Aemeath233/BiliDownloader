@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>../../logo.ico</ApplicationIcon>
+    <AssemblyName>BiliDownloader</AssemblyName>
+    <Version>3.0.0</Version>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UiRegression)' == 'true'">
+    <DefineConstants>$(DefineConstants);UI_REGRESSION</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(UiRegression)' == 'true'">
+    <Compile Include="../../scripts/WinUIRegression.cs" Link="WinUIRegression.cs" />
+    <Compile Include="../../scripts/WinUIExperienceAudit.cs" Link="WinUIExperienceAudit.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4948" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <ProjectReference Include="../BiliDownloader.Core/BiliDownloader.Core.csproj" />
+    <Content Include="../../bili_client/desktop/assets/brand.png" Link="Assets/brand.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../logo.ico" Link="logo.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../vendor/ffmpeg-minimal/bin/ffmpeg.exe" Link="ffmpeg.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../vendor/ffmpeg-minimal/bin/ffmpeg.exe')" />
+  </ItemGroup>
+  <!-- The unpackaged SDK build generates these resources without adding them to publish. -->
+  <Target Name="IncludeUnpackagedXamlResources" BeforeTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="$(GenerateProjectPriFile);Prep_ComputeProcessXamlFiles"
+          Condition="'$(WindowsPackageType)' == 'None'">
+    <Error Condition="!Exists('$(ProjectPriFullPath)')" Text="The application PRI was not generated for publishing." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(ProjectPriFullPath)" RelativePath="$(ProjectPriFileName)" CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="@(GeneratedXamlDest)">
+        <RelativePath>$([MSBuild]::MakeRelative('$(TargetDir)', '%(GeneratedXamlDest.FullPath)'))</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

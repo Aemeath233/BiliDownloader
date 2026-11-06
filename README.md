@@ -12,7 +12,29 @@
 >
 > 本声明为使用倡议；源码授权仍以 [MIT 许可证](LICENSE) 为准，不构成对该许可证新增的非商业限制。
 
-面向 Windows 的 B 站视频下载客户端。使用内嵌 WebView2 界面和本地 Python 下载核心，双击使用，不启动网页服务、不需要打开浏览器。支持分享链接、BV / ep / ss 编号、分集与画质选择、下载队列、扫码登录和全局限速。
+## 当前开发版本 · 3.0 WinUI 3 预览
+
+新客户端使用 C#、.NET 10 和 WinUI 3。解析、登录、下载调度、文件保存与界面均由原生项目实现，通过独立 FFmpeg 进程完成音视频封装。
+
+- 支持完整视频、仅音频和无声视频，下载中可以切页解析其他链接并继续加入队列。
+- 使用原生控件和蓝白主题，支持浅色、深色及系统主题。长标题单行省略，悬停可查看全文。
+- 调整窗口尺寸、字体密度和操作按钮，增强复选框选中反馈。单视频与合集分别使用适合的布局。
+- 设置直接控制同时下载数量与全局限速。任务状态、重试、打开文件和定位目录集中在下载队列。
+- 兼容原有用户数据格式，首次迁移建立备份，登录信息使用当前 Windows 用户的 DPAPI 保护。
+
+本机已通过 23 项核心测试、26 组原生 UI 检查和生产发布版启动退出检查。完整测试使用模拟 HTTP 与真实本地媒体，实网扫码、会员权限及干净系统安装仍需验收。当前为预览开发版，最新已发布安装包为下文的 v2.2.0。
+
+开发机安装 .NET 10 SDK 和 Windows SDK 10.0.26100 后，可以从仓库根目录构建。
+
+```powershell
+dotnet build BiliDownloader.sln -c Release -p:Platform=x64
+```
+
+下载功能需要 FFmpeg，可在设置中选择其完整路径。源码目录、运行与发布方式、完整回归依赖见 [WinUI 3 开发与验证](docs/WINUI.md)，本轮修复与测量见 [原生客户端审查报告](docs/WINUI-AUDIT-2026-11-06.md)，版本变化见 [更新日志](CHANGELOG.md)。
+
+## 已发布版本 · v2.2.0
+
+以下使用与打包说明对应 v2.2.0。该版本使用内嵌 WebView2 界面和本地 Python 下载核心，支持分享链接、BV / ep / ss 编号、分集与画质选择、下载队列、扫码登录和全局限速。
 
 **普通用户下载 [v2.2.0 安装包](https://github.com/Aemeath233/BiliDownloader/releases/download/v2.2.0/BiliDownloader-Setup.exe)，开发者按下面的源码教程运行。完整附件见 [GitHub Releases](https://github.com/Aemeath233/BiliDownloader/releases/latest)，本轮改动见 [更新日志](CHANGELOG.md)。源码仓库不携带 Python 环境或 FFmpeg。**
 

@@ -2,6 +2,16 @@
 
 本项目自身的源码采用 MIT 许可证，见 [LICENSE](LICENSE)。第三方程序和 Python 包保留各自的许可证。
 
+## C# / WinUI 3 预览客户端
+
+原生项目通过 NuGet 引用 Windows App SDK WinUI 组件、Windows SDK BuildTools、System.Security.Cryptography.ProtectedData 和 QRCoder。实际版本与传递依赖以项目文件及还原结果为准。
+
+- QRCoder 1.6.0 使用 MIT 许可证，来源见 [QRCoder](https://github.com/codebude/QRCoder)。
+- .NET 与 Windows App SDK 运行组件按其各自发行包中的许可和第三方声明分发。Windows App SDK NuGet 包包含独立的 `license.txt`，来源见 [Windows App SDK](https://github.com/microsoft/WindowsAppSDK)。
+- 原生客户端通过独立 FFmpeg 进程封装媒体。携带精简 FFmpeg 时沿用下文的固定源码、构建信息、许可证及源码交付要求。
+
+当前提交包含原生源码与测试脚本。正式生成原生安装包时，应汇集实际发行组件的许可与通知文件，并完成分发验收。
+
 ## FFmpeg
 
 源码仓库不包含 FFmpeg 二进制或压缩包。源码用户自行安装 FFmpeg 并配置 PATH。

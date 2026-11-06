@@ -18,6 +18,9 @@ dist/
 # Local IDE/project state
 .idea/
 .vscode/
+.vs/
+**/bin/
+**/obj/
 
 # Runtime/local secrets
 sessdata.txt
