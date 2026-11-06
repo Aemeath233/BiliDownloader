@@ -1,19 +1,23 @@
-param([string]$ReportDirectory)
+param([string]$ReportDirectory, [string]$ApplicationDirectory, [string]$ProfileDirectory)
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $output = if ($ReportDirectory) { [System.IO.Path]::GetFullPath($ReportDirectory) } else { Join-Path $workspace ('build/publish-verification/' + [guid]::NewGuid().ToString('N')) }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-$appDirectory = Join-Path $workspace ('build/winui-publish/' + [guid]::NewGuid().ToString('N'))
-$profile = Join-Path $output ('profile-' + [guid]::NewGuid().ToString('N'))
+$appDirectory = if ($ApplicationDirectory) { (Resolve-Path -LiteralPath $ApplicationDirectory).Path } else { Join-Path $workspace ('build/winui-publish/' + [guid]::NewGuid().ToString('N')) }
+$profile = if ($ProfileDirectory) { [IO.Path]::GetFullPath($ProfileDirectory) } else { Join-Path $output ('profile-' + [guid]::NewGuid().ToString('N')) }
 $reportPath = Join-Path $output 'report.json'
 $process = $null
 $result = [ordered]@{ passed = $false; application_directory = $appDirectory; profile = $profile }
 try {
-    & dotnet publish (Join-Path $workspace 'src/BiliDownloader.WinUI/BiliDownloader.WinUI.csproj') -c Release -p:Platform=x64 -p:UiRegression=false -o $appDirectory -v:minimal
-    if ($LASTEXITCODE -ne 0) { throw 'Production publish failed' }
+    if (-not $ApplicationDirectory) {
+        & dotnet publish (Join-Path $workspace 'src/BiliDownloader.WinUI/BiliDownloader.WinUI.csproj') -c Release -p:Platform=x64 -p:UiRegression=false -o $appDirectory -v:minimal
+        if ($LASTEXITCODE -ne 0) { throw 'Production publish failed' }
+    }
     foreach ($resource in @('BiliDownloader.exe', 'BiliDownloader.pri', 'App.xbf', 'MainWindow.xbf', 'Assets/brand.png', 'logo.ico', 'ffmpeg.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $resource))) { throw "Published resource missing $resource" }
     }
+    $initialLogs = @(Get-ChildItem -LiteralPath (Join-Path $profile 'logs') -Filter 'native-*.log' -ErrorAction SilentlyContinue)
+    $initialReadyCount = @($initialLogs | Select-String -Pattern '客户端已就绪').Count
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $process = Start-Process -FilePath (Join-Path $appDirectory 'BiliDownloader.exe') -ArgumentList @('--profile', ('"' + $profile + '"')) -WorkingDirectory $appDirectory -WindowStyle Hidden -PassThru
     $ready = $false
@@ -21,7 +25,7 @@ try {
         $process.Refresh()
         if ($process.HasExited) { throw "Published application exited before readiness, code $($process.ExitCode)" }
         $logs = @(Get-ChildItem -LiteralPath (Join-Path $profile 'logs') -Filter 'native-*.log' -ErrorAction SilentlyContinue)
-        $ready = $process.MainWindowHandle -ne 0 -and @($logs | Select-String -Pattern '客户端已就绪').Count -gt 0
+        $ready = $process.MainWindowHandle -ne 0 -and @($logs | Select-String -Pattern '客户端已就绪').Count -gt $initialReadyCount
         if ($ready) { break }
         Start-Sleep -Milliseconds 100
     }

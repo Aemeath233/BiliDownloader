@@ -22,7 +22,9 @@
 - 设置直接控制同时下载数量与全局限速。任务状态、重试、打开文件和定位目录集中在下载队列。
 - 兼容原有用户数据格式，首次迁移建立备份，登录信息使用当前 Windows 用户的 DPAPI 保护。
 
-本机已通过 23 项核心测试、26 组原生 UI 检查和生产发布版启动退出检查。完整测试使用模拟 HTTP 与真实本地媒体，实网扫码、会员权限及干净系统安装仍需验收。当前为预览开发版，最新已发布安装包为下文的 v2.2.0。
+**[下载 WinUI 3 预览版安装包](https://github.com/Aemeath233/BiliDownloader/releases/download/v3.0.0-preview.1/BiliDownloader-Setup.exe)**，适用于 Windows x64。安装包包含 .NET、WinUI 运行文件与精简 FFmpeg，默认安装到当前用户目录，并提供桌面和开始菜单入口。[完整附件与更新说明](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0-preview.1)。
+
+本机已通过 23 项核心测试、26 组原生 UI 检查和生产发布版启动退出检查。完整测试使用模拟 HTTP 与真实本地媒体，实网扫码、会员权限及干净系统安装仍需验收。当前为 3.0.0-preview.1，v2.2.0 的安装与使用说明见下文。
 
 开发机安装 .NET 10 SDK 和 Windows SDK 10.0.26100 后，可以从仓库根目录构建。
 

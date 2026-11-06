@@ -10,7 +10,7 @@
 - .NET 与 Windows App SDK 运行组件按其各自发行包中的许可和第三方声明分发。Windows App SDK NuGet 包包含独立的 `license.txt`，来源见 [Windows App SDK](https://github.com/microsoft/WindowsAppSDK)。
 - 原生客户端通过独立 FFmpeg 进程封装媒体。携带精简 FFmpeg 时沿用下文的固定源码、构建信息、许可证及源码交付要求。
 
-当前提交包含原生源码与测试脚本。正式生成原生安装包时，应汇集实际发行组件的许可与通知文件，并完成分发验收。
+原生安装包在 `licenses` 目录汇集实际发行组件的许可与通知文件，包括 .NET Runtime、Windows App SDK 组件、QRCoder 和 FFmpeg。Release 同时提供 `Runtime-Licenses.zip` 与 FFmpeg 对应源码附件。QRCoder 许可文件取自上述 1.6.0 包对应源码提交，保留原文。
 
 ## FFmpeg
 
