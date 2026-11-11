@@ -1,6 +1,6 @@
 # WinUI 3 开发与验证
 
-当前原生客户端为 3.0.0，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。[Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0) 包含程序所需的 .NET、WinUI 和精简 FFmpeg。仓库内的 Python/WebView2 项目对应已发布的 v2.2.0，其运行与构建方法见 [旧版构建说明](BUILDING.md)。
+当前原生客户端为 3.0.0，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。[Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0) 包含程序所需的 .NET、WinUI 和精简 FFmpeg。安装包与 FFmpeg 准备方法见[构建说明](BUILDING.md)。
 
 ## 源码结构
 
@@ -22,7 +22,7 @@ UI 在同一窗口中切换四个页面。解析与下载异步运行，切页�
 
 ## 开发环境
 
-- Windows x64。本轮在 Windows 11、150% 显示缩放下验证。
+- Windows x64 与 PowerShell 7。本轮在 Windows 11、150% 显示缩放下验证。
 - .NET 10 SDK。本机验证版本为 10.0.403。
 - Windows SDK 10.0.26100。使用 Visual Studio 开发时安装相应 Windows 应用开发组件。
 - NuGet 依赖通过根目录 `NuGet.Config` 中的 nuget.org 还原。
@@ -72,7 +72,7 @@ dotnet publish .\src\BiliDownloader.WinUI\BiliDownloader.WinUI.csproj -c Release
 
 输出位于 `dist/native-installer/`。安装包默认安装到 `%LOCALAPPDATA%\Programs\BiliDownloader`，提供桌面快捷方式、开始菜单入口和系统卸载入口。安装时要求先关闭客户端，覆盖升级清理旧 `_internal` 程序依赖，保留用户目录和已下载文件。
 
-验证脚本以独立 AppId 与快捷方式名称编译同一套安装脚本，逐文件比对发行载荷。存在本机 v2.2.0 安装时，会只读取其程序 EXE 和 `_internal` 创建隔离旧版，再验证升级到原生版。也可以用 `-LegacyApplicationDirectory` 指向准备好的旧版程序目录。随后验证三次启动、DPAPI 迁移、使用安装目录 FFmpeg 的核心回归、运行中阻止覆盖与卸载、覆盖升级、新安装和卸载。报告和日志保存在 `build/native-installer-verification`。
+验证脚本以独立 AppId 与快捷方式名称编译同一套安装脚本，逐文件比对发行载荷。脚本先建立原生基线安装，再注入合成的旧依赖目录、用户文件和登录数据，检查升级时的依赖清理与数据迁移。随后验证三次启动、DPAPI 迁移、使用安装目录 FFmpeg 的核心回归、运行中阻止覆盖与卸载、覆盖升级、新安装和卸载。报告和日志保存在 `build/native-installer-verification`。
 
 当前 Windows 安装流程在开发机以隔离安装标识验证。缺少开发运行环境的干净虚拟机与生产安装标识下的升级需继续验收。
 

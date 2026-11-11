@@ -1,4 +1,3 @@
-param([string]$LegacyApplicationDirectory)
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $manifest = Get-Content -LiteralPath (Join-Path $workspace 'build/native-installer/manifest.json') -Raw | ConvertFrom-Json
@@ -6,7 +5,6 @@ $testId = [guid]::NewGuid().ToString().ToUpperInvariant()
 $testName = 'BiliDownloader Native Verification ' + $testId.Substring(0, 8)
 $run = Join-Path $workspace ('build/native-installer-verification/' + $testId)
 $nativeSetupDirectory = Join-Path $run 'native-setup'
-$legacySetupDirectory = Join-Path $run 'legacy-setup'
 $target = Join-Path $run '安装 空目录'
 $profile = Join-Path $run 'legacy-profile'
 $testRegistry = "HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/{$testId}_is1"
@@ -54,7 +52,6 @@ try {
         "/DMyAppName=$testName",
         "/DAppSourceDir=$($manifest.application_directory)",
         "/DAppOutputDir=$nativeSetupDirectory",
-        '/DNativeClient=1',
         "/DMyAppVersion=$($manifest.version)",
         ('/DMyAppFileVersion=' + ($manifest.version -split '-')[0]),
         (Join-Path $workspace 'installer/BiliDownloader.iss')
@@ -62,22 +59,8 @@ try {
     & $manifest.inno_compiler @compilerArguments *> (Join-Path $run 'native-compile.log')
     if ($LASTEXITCODE -ne 0) { throw 'Test identity installer compilation failed' }
     $nativeSetup = Join-Path $nativeSetupDirectory 'BiliDownloader-Setup.exe'
-    if (-not $LegacyApplicationDirectory -and $productionBefore.DisplayVersion -eq '2.2.0') { $LegacyApplicationDirectory = $productionBefore.InstallLocation }
-    if ($LegacyApplicationDirectory) {
-        $legacyPayload = Join-Path $run 'legacy-payload'
-        New-Item -ItemType Directory -Path $legacyPayload, $legacySetupDirectory -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $LegacyApplicationDirectory 'BiliDownloader.exe') -Destination $legacyPayload
-        Copy-Item -LiteralPath (Join-Path $LegacyApplicationDirectory '_internal') -Destination $legacyPayload -Recurse
-        & $manifest.inno_compiler ('/DMyAppId={{' + $testId + '}') "/DMyAppName=$testName" "/DAppSourceDir=$legacyPayload" "/DAppOutputDir=$legacySetupDirectory" (Join-Path $workspace 'installer/BiliDownloader.iss') *> (Join-Path $run 'legacy-compile.log')
-        if ($LASTEXITCODE -ne 0) { throw 'Legacy test identity installer compilation failed' }
-        Install-TestPackage (Join-Path $legacySetupDirectory 'BiliDownloader-Setup.exe') (Join-Path $run 'legacy-install.log')
-        if ((Get-ItemProperty -LiteralPath $testRegistry).DisplayVersion -ne '2.2.0') { throw 'Legacy package did not register version 2.2.0' }
-        $report.checks += 'legacy_2_2_install'
-    }
-    else {
-        Install-TestPackage $nativeSetup (Join-Path $run 'initial-native-install.log')
-        $report.checks += 'initial_native_install'
-    }
+    Install-TestPackage $nativeSetup (Join-Path $run 'initial-native-install.log')
+    $report.checks += 'initial_native_install'
     New-Item -ItemType Directory -Path (Join-Path $target '_internal'), (Join-Path $target 'video') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $target '_internal/obsolete-test.dll') -Value 'owned test dependency'
     $video = Join-Path $target 'video/keep-test.mp4'

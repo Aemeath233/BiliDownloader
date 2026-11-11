@@ -1,28 +1,20 @@
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-*.egg-info/
-
-# Local environments
-.venv/
-
-# Build outputs
+# Build outputs and external tools
 build/
 dist/
+vendor/
+ffmpeg-master-*.zip
 
-# Local IDE/project state
+# Local IDE state and caches
 .idea/
 .vscode/
 .vs/
 **/bin/
 **/obj/
+__pycache__/
+.venv/
+.ruff_cache/
 
-# Runtime/local secrets
+# Runtime and local secrets
 sessdata.txt
 *.log
 .env
@@ -37,11 +29,3 @@ video/
 *.m4a
 *.part
 *.tmp
-
-# Bundled third-party binaries and downloaded archives
-vendor/ffmpeg/
-vendor/ffmpeg-minimal/
-vendor/webview2/
-vendor/webview2-bootstrapper/
-vendor/*.cab
-ffmpeg-master-*.zip
