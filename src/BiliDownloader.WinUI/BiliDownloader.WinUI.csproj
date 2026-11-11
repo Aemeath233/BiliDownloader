@@ -16,7 +16,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>../../logo.ico</ApplicationIcon>
     <AssemblyName>BiliDownloader</AssemblyName>
-    <Version>3.0.0-preview.1</Version>
+    <Version>3.0.0</Version>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
