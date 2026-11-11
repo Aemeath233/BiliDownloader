@@ -1,6 +1,6 @@
 # WinUI 3 开发与验证
 
-当前原生客户端为 3.0.0-preview.1，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。[Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0-preview.1) 包含程序所需的 .NET、WinUI 和精简 FFmpeg。仓库内的 Python/WebView2 项目对应已发布的 v2.2.0，其运行与构建方法见 [旧版构建说明](BUILDING.md)。
+当前原生客户端为 3.0.0，使用 C#、.NET 10、WinUI 3 和独立 FFmpeg 进程。[Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0) 包含程序所需的 .NET、WinUI 和精简 FFmpeg。仓库内的 Python/WebView2 项目对应已发布的 v2.2.0，其运行与构建方法见 [旧版构建说明](BUILDING.md)。
 
 ## 源码结构
 

@@ -12,13 +12,13 @@
 >
 > 本声明为使用倡议；源码授权仍以 [MIT 许可证](LICENSE) 为准，不构成对该许可证新增的非商业限制。
 
-## 当前版本 · v3.0.0-preview.1
+## 当前版本 · v3.0.0
 
 BiliDownloader 是一个 Windows 桌面端 B 站视频下载工具。3.0 使用 C#、.NET 10 和 WinUI 3 实现解析、扫码登录、下载队列与原生界面，通过 FFmpeg 完成音视频封装。
 
-**[下载 Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/download/v3.0.0-preview.1/BiliDownloader-Setup.exe)** · [发行说明与校验文件](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0-preview.1) · [更新日志](CHANGELOG.md)
+**[下载 Windows x64 安装包](https://github.com/Aemeath233/BiliDownloader/releases/download/v3.0.0/BiliDownloader-Setup.exe)** · [发行说明与校验文件](https://github.com/Aemeath233/BiliDownloader/releases/tag/v3.0.0) · [更新日志](CHANGELOG.md)
 
-当前版本为 3.0 预览版。GitHub 的 `Latest` 标记仍指向旧版 v2.2.0，请使用上面的 3.0 下载入口。旧版使用与开发说明已归档到 [v2.2.0 文档](docs/LEGACY-2.2.md)。
+当前正式版本为 3.0。旧版使用与开发说明已归档到 [v2.2.0 文档](docs/LEGACY-2.2.md)。
 
 ## 安装与开始使用
 

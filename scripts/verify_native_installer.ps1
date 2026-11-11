@@ -74,6 +74,10 @@ try {
         if ((Get-ItemProperty -LiteralPath $testRegistry).DisplayVersion -ne '2.2.0') { throw 'Legacy package did not register version 2.2.0' }
         $report.checks += 'legacy_2_2_install'
     }
+    else {
+        Install-TestPackage $nativeSetup (Join-Path $run 'initial-native-install.log')
+        $report.checks += 'initial_native_install'
+    }
     New-Item -ItemType Directory -Path (Join-Path $target '_internal'), (Join-Path $target 'video') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $target '_internal/obsolete-test.dll') -Value 'owned test dependency'
     $video = Join-Path $target 'video/keep-test.mp4'
