@@ -1,4 +1,0 @@
--r requirements-build.txt
-customtkinter>=5.2,<6.0
-ruff>=0.14,<1.0
-pip-audit>=2.9,<3.0

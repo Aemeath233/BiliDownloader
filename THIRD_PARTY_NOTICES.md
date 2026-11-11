@@ -1,41 +1,28 @@
 # 第三方组件
 
-本项目自身的源码采用 MIT 许可证，见 [LICENSE](LICENSE)。第三方程序和 Python 包保留各自的许可证。
+项目源码采用 [MIT 许可证](LICENSE)。发行包中的第三方程序与运行组件保留各自许可证。
 
-## C# / WinUI 3 预览客户端
+## .NET 与 WinUI
 
-原生项目通过 NuGet 引用 Windows App SDK WinUI 组件、Windows SDK BuildTools、System.Security.Cryptography.ProtectedData 和 QRCoder。实际版本与传递依赖以项目文件及还原结果为准。
+原生项目通过 NuGet 引用 Windows App SDK WinUI 组件、Windows SDK BuildTools、System.Security.Cryptography.ProtectedData 和 QRCoder。版本与传递依赖以项目文件和还原结果为准。
 
-- QRCoder 1.6.0 使用 MIT 许可证，来源见 [QRCoder](https://github.com/codebude/QRCoder)。
-- .NET 与 Windows App SDK 运行组件按其各自发行包中的许可和第三方声明分发。Windows App SDK NuGet 包包含独立的 `license.txt`，来源见 [Windows App SDK](https://github.com/microsoft/WindowsAppSDK)。
-- 原生客户端通过独立 FFmpeg 进程封装媒体。携带精简 FFmpeg 时沿用下文的固定源码、构建信息、许可证及源码交付要求。
-
-原生安装包在 `licenses` 目录汇集实际发行组件的许可与通知文件，包括 .NET Runtime、Windows App SDK 组件、QRCoder 和 FFmpeg。Release 同时提供 `Runtime-Licenses.zip` 与 FFmpeg 对应源码附件。QRCoder 许可文件取自上述 1.6.0 包对应源码提交，保留原文。
+- QRCoder 1.6.0 使用 MIT 许可证，来源为 [QRCoder](https://github.com/codebude/QRCoder)。
+- .NET 与 Windows App SDK 组件按各自发行包的许可和第三方声明分发。Windows App SDK 的许可见 [上游项目](https://github.com/microsoft/WindowsAppSDK)。
+- 安装包的 `licenses` 目录汇集实际发行组件的许可与通知，包括 .NET Runtime、Windows App SDK、QRCoder 和 FFmpeg。Release 同时提供 `Runtime-Licenses.zip`。
 
 ## FFmpeg
 
-源码仓库不包含 FFmpeg 二进制或压缩包。源码用户自行安装 FFmpeg 并配置 PATH。
+原生客户端通过独立 FFmpeg 进程封装媒体。发行包使用固定源码构建精简静态 FFmpeg，仅保留本地文件读取、相关解封装、解析器及 MP4 封装。
 
-便携版通过单独的 `ffmpeg.exe` 子进程完成音视频封装，不将 FFmpeg 库链接进 Python 程序。默认构建从以下固定源码编译精简静态 FFmpeg，只启用本地文件读取、相关解封装、解析器及 MP4 封装；不含音视频编码器，不启用 GPL、nonfree 或外部媒体库：
+- 源码提交为 [`f044c5e62710a151e001ae097fd3a07b88540766`](https://github.com/FFmpeg/FFmpeg/commit/f044c5e62710a151e001ae097fd3a07b88540766)。
+- 源码压缩包 SHA256 为 `842f845c8e7e5d338b60c3eeaeeefc0dc2da15401a7d12fb8a52dd56af2181df`。
+- 构建脚本为 `scripts/build_ffmpeg_minimal.ps1`，完整配置与编译器信息记录在 `FFmpeg-source-info.json` 和 `FFmpeg-build-info.txt`。
+- 本构建采用 LGPL 2.1 或更新版本，许可证随程序保存在 `licenses/ffmpeg/LICENSE.txt`，Release 附件同时提供许可证和未经修改的对应源码。
 
-- FFmpeg 源码提交：[`f044c5e62710a151e001ae097fd3a07b88540766`](https://github.com/FFmpeg/FFmpeg/commit/f044c5e62710a151e001ae097fd3a07b88540766)
-- 源码压缩包 SHA256：`842f845c8e7e5d338b60c3eeaeeefc0dc2da15401a7d12fb8a52dd56af2181df`
-- 本地编译脚本：`scripts/build_ffmpeg_minimal.py`，完整配置、编译器信息保存在 `FFmpeg-source-info.json` 和 `FFmpeg-build-info.txt`。
-- 本构建采用 LGPL 2.1 或更新版本；许可证随程序内置于 `ffmpeg/LICENSE.txt`，同时作为分发附件提供。
-- 分发目录保留未经修改的对应 FFmpeg 源码快照，作为单独附件；不计入用户运行所需的单个 EXE。替换 FFmpeg 后重新打包的方法见 `docs/BUILDING.md`。
+开发测试使用 BtbN 的全功能共享构建生成素材和检查输出。该测试工具位于 `vendor/ffmpeg`，保持 DLL 与许可证完整。替换发行包的 FFmpeg 时，应重新核对其许可、对应源码与依赖信息。详见 [FFmpeg 官方许可说明](https://www.ffmpeg.org/legal.html)及 [BtbN 构建配方](https://github.com/BtbN/FFmpeg-Builds/tree/master/scripts.d)。准备方式见[构建说明](docs/BUILDING.md)。
 
-开发验证另用 BtbN 的 `N-124223-gf044c5e627-20260428 win64-gpl-shared` 全功能包生成测试素材；它默认不进入发行程序。只有显式指定 `-FullFFmpeg` 才分发该 GPL 构建，必须随包保留其 GPL 许可证、对应源码及上游依赖构建信息。更多信息见 [FFmpeg 官方许可说明](https://www.ffmpeg.org/legal.html)及 [BtbN 构建配方](https://github.com/BtbN/FFmpeg-Builds/tree/master/scripts.d)。
+## 安装程序
 
-## Python 组件
+安装包由 [Inno Setup](https://jrsoftware.org/) 生成。简体中文翻译来自其官方仓库的 [ChineseSimplified.isl](https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl)，保留原文件的译者说明。
 
-Python、pywebview、pythonnet、HTTPX、certifi、Pillow、PyCryptodome、qrcode 和构建工具使用各自上游许可证。CustomTkinter 仅供旧界面回归测试，不再进入发行包。版本范围分别记录在 `requirements.txt`、`requirements-build.txt` 和 `requirements-dev.txt`。
-
-## Microsoft WebView2
-
-默认安装包携带微软签名的 Evergreen 小型引导程序，已有运行时即跳过，缺少时由安装向导联网安装；校验值记录在开发资源目录的 `SOURCE.json`。应用卸载时保留共享运行时。
-
-安装程序由 [Inno Setup](https://jrsoftware.org/) 生成；简体中文翻译来自其官方仓库的 [ChineseSimplified.isl](https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl)，保留原文件的译者说明。
-
-内嵌界面使用 Microsoft WebView2。标准版使用系统安装的运行时；完整便携版包含从[微软官方下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)取得的 x64 Fixed Version Runtime，保留完整上游目录、第三方组件信息和签名文件。该运行时适用微软提供的许可条款，不重新授权为 MIT。来源、版本和 CAB 校验值保存在运行时目录的 `bili-runtime-source.json` 中。WebView2 SDK 互操作组件由 pywebview 包提供。
-
-项目不会把开发机的 Python 环境、账号文件、日志或下载视频放入 Git。便携版包含执行程序所需的运行组件，接收方无需安装 Python 或这些依赖。
+仓库保存应用源码、图标、测试和构建配置。开发环境、第三方二进制、用户账号、日志和下载文件由 Git 忽略。

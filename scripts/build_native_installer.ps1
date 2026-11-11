@@ -51,7 +51,7 @@ $ffmpegNotices = Join-Path $licenses 'ffmpeg'
 New-Item -ItemType Directory -Path $ffmpegNotices -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $ffmpeg 'LICENSE.txt'), (Join-Path $ffmpeg 'BUILD-INFO.txt'), (Join-Path $ffmpeg 'SOURCE.json') -Destination $ffmpegNotices
 
-& $InnoCompiler '/DNativeClient=1' "/DMyAppVersion=$version" "/DMyAppFileVersion=$fileVersion" "/DAppSourceDir=$appDirectory" "/DAppOutputDir=$output" (Join-Path $workspace 'installer/BiliDownloader.iss')
+& $InnoCompiler "/DMyAppVersion=$version" "/DMyAppFileVersion=$fileVersion" "/DAppSourceDir=$appDirectory" "/DAppOutputDir=$output" (Join-Path $workspace 'installer/BiliDownloader.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
 $setup = Join-Path $output 'BiliDownloader-Setup.exe'
 if ((Get-Item -LiteralPath $setup).Length -gt 100MB) { throw 'Native installer exceeds the 100 MiB size budget' }

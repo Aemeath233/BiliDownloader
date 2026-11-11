@@ -32,7 +32,7 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4948" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <ProjectReference Include="../BiliDownloader.Core/BiliDownloader.Core.csproj" />
-    <Content Include="../../bili_client/desktop/assets/brand.png" Link="Assets/brand.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="Assets\brand.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../logo.ico" Link="logo.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../vendor/ffmpeg-minimal/bin/ffmpeg.exe" Link="ffmpeg.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../vendor/ffmpeg-minimal/bin/ffmpeg.exe')" />
   </ItemGroup>
