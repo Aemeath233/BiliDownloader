@@ -437,15 +437,12 @@ public sealed partial class MainWindow : Window
     private void RetryTask(object sender, RoutedEventArgs e) => RetryIds([TaskId(sender)]);
     private void RemoveTask(object sender, RoutedEventArgs e) { runtime!.Downloads.Remove([TaskId(sender)]); Refresh(); }
     private void OpenTask(object sender, RoutedEventArgs e) { if (FindTask(sender) is { } record) OpenPath(record.OutputPath); }
-    private void LocateTask(object sender, RoutedEventArgs e)
+    private async void LocateTask(object sender, RoutedEventArgs e)
     {
         if (FindTask(sender) is not { } record) return;
-        try
-        {
-            if (!File.Exists(record.OutputPath)) { ShowNotice("文件已移动或删除", true); return; }
-            var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = true }; info.ArgumentList.Add("/select," + record.OutputPath); Process.Start(info);
-        }
-        catch (Exception ex) { ShowNotice(Network.SafeError(ex), true); }
+        try { await Task.Run(() => FileLocation.Reveal(record.OutputPath)); }
+        catch (FileNotFoundException) { ShowNotice("文件已移动、重命名或删除", true); }
+        catch (Exception ex) { ShowNotice("无法在资源管理器中定位文件：" + Network.SafeError(ex), true); }
     }
     private async void ReselectTask(object sender, RoutedEventArgs e)
     {
